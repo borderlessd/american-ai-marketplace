@@ -1,0 +1,91 @@
+
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Find Loads — American AI</title>
+<link rel="stylesheet" href="assets/styles.css">
+<script defer src="assets/app.js"></script>
+</head><body>
+<div class="nav">
+  <div><a href="index.html">American AI Marketplace</a></div>
+  <div>
+    <a href="index.html">Home</a>
+    <a href="loads.html">Find Loads</a>
+    <a id="adminLink" href="#" style="display:none" onclick="document.getElementById('gateModal').classList.add('open');return false;">Admin</a>
+  </div>
+</div>
+<section class="hero">
+  <h1>Move America, intelligently.</h1>
+  <div class="wrap" style="text-align:center">
+    <span class="badge">US-based</span>
+    <span class="badge">MC/USDOT</span>
+    <span class="badge">5% Marketplace Fee</span>
+  </div>
+</section>
+<div class="wrap">
+  <div class="controls">
+    <input id="q" class="input" placeholder="Search city, commodity, item…">
+    <select id="commodity" class="input">
+      <option value="">All commodities</option>
+      <option>Vehicle</option><option>Boat</option><option>Motorcycle</option>
+      <option>Household</option><option>LTL</option><option>Pets</option><option>Heavy Equipment</option>
+    </select>
+  </div>
+  <div id="grid" class="grid"></div>
+</div>
+<div class="footer">
+  <div class="wrap footer-note">
+    © American AI Marketplace
+    <span style="float:right">Append <code>?admin=true</code> to reveal admin</span>
+  </div>
+</div>
+
+<!-- View Modal -->
+<div id="viewModal" class="modal"><div class="panel">
+  <div id="viewContent"></div>
+</div></div>
+
+<!-- Auth Modal (bidding) -->
+<div id="authModal" class="modal"><div class="panel">
+  <div class="title">Sign in</div>
+  <label>Username
+    <input id="username" class="input" placeholder="Enter a username">
+  </label>
+  <div style="height:8px"></div>
+  <label>Password
+    <input id="password" type="password" class="input" placeholder="Enter your password">
+  </label>
+  <div id="authError" class="error"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+    <button class="btn secondary" onclick="document.getElementById('authModal').classList.remove('open')">Cancel</button>
+    <button class="btn" onclick="signin()">Continue</button>
+  </div>
+</div></div>
+
+<!-- Admin Gate Modal (name & password) -->
+<div id="gateModal" class="modal"><div class="panel">
+  <div class="title">Admin Access</div>
+  <label>Username
+    <input id="gateUser" class="input" placeholder="Enter a username">
+  </label>
+  <div style="height:8px"></div>
+  <label>Password
+    <input id="gatePass" type="password" class="input" placeholder="Enter your password">
+  </label>
+  <div id="gateError" class="error"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+    <button class="btn secondary" onclick="document.getElementById('gateModal').classList.remove('open')">Cancel</button>
+    <button class="btn" onclick="(function(){
+      const u=document.getElementById('gateUser').value.trim();
+      const p=document.getElementById('gatePass').value.trim();
+      const okU='admin', okP='market';
+      if(u===okU && p===okP){
+        sessionStorage.setItem('aim_admin_ok','1');
+        window.location.href='admin/';
+      }else{
+        document.getElementById('gateError').textContent='Invalid username or password.';
+      }
+    })()">Enter</button>
+  </div>
+</div></div>
+
+</body></html>
