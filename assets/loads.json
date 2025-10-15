@@ -1,0 +1,48 @@
+{
+  "loads": [
+    {
+      "id": 1,
+      "item": "2019 Ford F-150 (running)",
+      "from_city": "Dallas, TX",
+      "to_city": "Orlando, FL",
+      "miles": 1107,
+      "date": "Oct 10",
+      "price": "$650+",
+      "commodity": "Vehicle",
+      "status": "open"
+    },
+    {
+      "id": 2,
+      "item": "1967 Mustang (non-run)",
+      "from_city": "San Jose, CA",
+      "to_city": "Las Vegas, NV",
+      "miles": 526,
+      "date": "Oct 12",
+      "price": "$900+",
+      "commodity": "Vehicle",
+      "status": "open"
+    },
+    {
+      "id": 3,
+      "item": "22' Center Console on trailer",
+      "from_city": "Tampa, FL",
+      "to_city": "Savannah, GA",
+      "miles": 299,
+      "date": "Flexible",
+      "price": "$950+",
+      "commodity": "Boat",
+      "status": "pending"
+    },
+    {
+      "id": 4,
+      "item": "2BR apartment (elevator)",
+      "from_city": "Seattle, WA",
+      "to_city": "Boise, ID",
+      "miles": 497,
+      "date": "Oct 15",
+      "price": "$1800+",
+      "commodity": "Household",
+      "status": "awarded"
+    }
+  ]
+}

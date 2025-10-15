@@ -1,0 +1,24 @@
+
+<!doctype html><html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — American AI</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head><body>
+<div class="nav"><div><a href="../index.html">American AI Marketplace</a></div>
+<div><strong style="margin-left:8px">Admin</strong></div></div>
+<div class="wrap">
+  <p style="margin:0 0 12px">Sign in with GitHub to edit loads. Changes auto-deploy via Netlify.</p>
+</div>
+<script>
+  window.__REPO__ = "borderlessd/american-ai-marketplace";
+  (function(){
+    if(sessionStorage.getItem('aim_admin_ok')!=='1'){
+      document.write('<div class="wrap" style="color:#b91c1c">Access denied. Go to the home page with <code>?admin=true</code> and pass the admin gate.</div>');
+      throw new Error('No gate flag');
+    }
+  })();
+</script>
+<script src="https://unpkg.com/decap-cms@^3.0.0/dist/decap-cms.js"></script>
+<script src="./admin.js"></script>
+</body></html>
