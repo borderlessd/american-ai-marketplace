@@ -31,7 +31,7 @@
       "date": "Flexible",
       "price": "$950+",
       "commodity": "Boat",
-      "status": "pending"
+      "status": "open"
     },
     {
       "id": 4,
@@ -42,7 +42,7 @@
       "date": "Oct 15",
       "price": "$1800+",
       "commodity": "Household",
-      "status": "awarded"
+      "status": "open"
     }
   ]
 }
