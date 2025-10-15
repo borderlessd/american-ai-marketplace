@@ -1,10 +1,10 @@
 
 (function(){
-  const repo = (window.__REPO__||"").trim();
-  const config = {
-    backend: { name:'github', repo, branch:'main' },
-    media_folder: "assets/uploads",
-    public_folder: "/assets/uploads",
+  const repo = "borderlessd/american-ai-marketplace";
+const config = {
+  backend: { name: "github", repo, branch: "main" },
+  media_folder: "assets/uploads",
+  public_folder: "/assets/uploads",
     collections: [{
       name: "loads",
       label: "Loads",
