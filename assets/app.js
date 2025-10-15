@@ -88,3 +88,56 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   loadData();
 });
+
+/* ---- NON-DESTRUCTIVE TEXT PATCH (append-only) ---- */
+(function () {
+  function splitMilesAvailableInPlace(root) {
+    // Find lines like: "Miles: 100 • Available: 2025-10-20"
+    // Replace with:    "Miles: 100<br>First Available Date: 2025-10-20"
+    const els = root.querySelectorAll('.meta, .details, .info');
+    els.forEach(el => {
+      const txt = (el.textContent || '').trim();
+      if (!txt) return;
+      // must contain both labels and a separator (• or -)
+      if (/Miles:\s*/i.test(txt) && /Available:\s*/i.test(txt) && (txt.includes('•') || / - /.test(txt))) {
+        const milesMatch = txt.match(/Miles:\s*([^•\-]+)/i);
+        const availMatch = txt.match(/Available:\s*(.*)$/i);
+        const milesVal = milesMatch ? milesMatch[1].trim() : '';
+        const availVal = availMatch ? availMatch[1].trim() : '';
+        // Keep the SAME element; just swap its HTML to add a <br>
+        el.innerHTML = `Miles: ${milesVal}<br>First Available Date: ${availVal}`;
+      }
+    });
+  }
+
+  function labelPriceInPlace(root) {
+    // Prepend "Price: " INSIDE the existing .price element so it keeps the same font/size
+    root.querySelectorAll('.price').forEach(el => {
+      const t = (el.textContent || '').trim();
+      if (!t) return;
+      if (!/^price:\s*/i.test(t)) {
+        // Use innerText to preserve existing styling; set once
+        el.textContent = `Price: ${t}`;
+      }
+    });
+  }
+
+  function applyPatch() {
+    const scope = document;
+    splitMilesAvailableInPlace(scope);
+    labelPriceInPlace(scope);
+  }
+
+  // Run when DOM is ready and a bit after (for async render)
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyPatch);
+  } else {
+    applyPatch();
+  }
+  setTimeout(applyPatch, 300);
+  setTimeout(applyPatch, 900);
+
+  // If your list re-renders dynamically, re-apply on mutations
+  const mo = new MutationObserver(() => applyPatch());
+  mo.observe(document.body, { childList: true, subtree: true });
+})();
