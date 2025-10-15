@@ -1,5 +1,10 @@
-# keep any existing [build] section you have above …
+# Keep your existing [build] block if you already have one.
+# If you don't have one, you can omit this whole [build] section.
+#[build]
+#  command = "npm run build"
+#  publish = "dist"
 
+# Force a rewrite of /assets/loads.json to your Google Sheet JSON.
 [[redirects]]
   from = "/assets/loads.json"
   to = "https://script.google.com/macros/s/AKfycbzXfnH8m0LxiQ1rkqf7AJt9qmp1sok722xYMmwdS96RKwgWBOt2xLrBc-1FPTnIbHP91A/exec"
