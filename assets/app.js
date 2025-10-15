@@ -1,115 +1,90 @@
-/* assets/app.js — FULL REPLACE
-   Renders loads in this exact layout per card:
-   Seattle → Phoenix ACTIVE
-   Item: Car
-   Miles: 100
-   Available: 2025-10-20
-   Price: $1299
-*/
+let LOADS = [];
+let TOKEN = localStorage.getItem('aim_token')||'';
+const $ = (q, el=document) => el.querySelector(q);
+function fmt(n){return new Intl.NumberFormat().format(n);}
 
-/* ========== helpers ========== */
-function formatPrice(v) {
-  const n = Number(v || 0);
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
-  } catch {
-    return `$${(Math.round(n) || 0).toString()}`;
+async function loadData(){
+  try{
+    const res = await fetch('/assets/loads.json?ts=' + Date.now());
+    const data = await res.json();
+    LOADS = Array.isArray(data) ? data : (data.loads||[]);
+  }catch(e){
+    console.error('Failed to load loads.json', e);
+    LOADS = [];
   }
-}
-function UC(x) { return String(x || '').trim().toUpperCase(); }
-
-/* ========== data ========== */
-async function fetchLoads() {
-  const url = `/assets/loads.json?v=${Date.now()}`; // cache-bust to reflect sheet changes
-  const res = await fetch(url, { cache: 'no-store', credentials: 'omit' });
-  if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
-  const arr = await res.json();
-  if (!Array.isArray(arr)) return [];
-  // Normalize to the theme keys your site uses
-  return arr.map(r => ({
-    id: r.id ?? r.load_number ?? '',
-    from_city: r.from_city ?? r.from ?? r.origin ?? r.pickup_city ?? '',
-    to_city:   r.to_city   ?? r.to   ?? r.destination ?? r.dropoff_city ?? '',
-    date:      r.date ?? r.availableDate ?? r.available ?? r.pickupDate ?? r.ready ?? '',
-    item:      r.item ?? r.vehicle ?? '',
-    miles:     Number(r.miles ?? r.distance ?? 0) || 0,
-    price:     Number(r.price ?? r.amount ?? r.rate ?? 0) || 0,
-    status:    String(r.status ?? 'open'),
-    notes:     r.notes ?? '',
-    commodity: r.commodity ?? r.item ?? r.vehicle ?? ''
-  }));
+  render(LOADS);
 }
 
-/* ========== render ========== */
-function renderLoads(loads) {
-  // Try common containers; fallback if none found
-  let container =
-    document.querySelector('#loads-list') ||
-    document.querySelector('.loads-list') ||
-    document.querySelector('#list') ||
-    document.querySelector('#loads') ||
-    document.querySelector('.cards');
-
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'loads-list';
-    document.body.appendChild(container);
-  }
-
-  if (!loads.length) {
-    container.innerHTML = `<div class="empty">No loads available.</div>`;
-    return;
-  }
-
-  const html = loads.map(l => {
-    const route = `
-      <div class="route">
-        ${l.from_city || '—'} → ${l.to_city || '—'}
-        <span class="status">${UC(l.status)}</span>
+function render(list){
+  const grid = $('#grid'); if(!grid) return;
+  grid.innerHTML = list.map((l, idx) => `
+    <article class="card">
+      <div class="route">${l.from_city} → ${l.to_city} <span class="status ${l.status||'open'}">${(l.status||'open').toUpperCase()}</span></div>
+      <div class="meta"><strong>Item:</strong> ${l.item}</div>
+      <div class="meta"><strong>Miles:</strong> ${fmt(l.miles)} • <strong>Available:</strong> ${l.date}</div>
+      <div class="price" style="margin:8px 0">${l.price||''}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn secondary" onclick="openView(${idx})">View</button>
+        <button class="btn" onclick="bid()">Bid</button>
       </div>
-    `;
-
-    const item = `<div class="meta">Item: ${l.item || '—'}</div>`;
-    const miles = `<div class="meta">Miles: ${Number.isFinite(l.miles) ? l.miles : '—'}</div>`;
-    const available = `<div class="meta">Available: ${l.date || '—'}</div>`;
-    // Price label stays inside .price so it inherits the same font/style as before
-    const price = `<div class="price">Price: ${formatPrice(l.price)}</div>`;
-
-    // If you need action buttons, keep them; otherwise, harmless
-    const actions = `
-      <div class="actions">
-        <a class="btn view" href="#" data-id="${l.id}">View</a>
-        <a class="btn bid" href="#" data-id="${l.id}">Bid</a>
-      </div>
-    `;
-
-    return `
-      <div class="load-card">
-        ${route}
-        ${item}
-        ${miles}
-        ${available}
-        ${price}
-        ${actions}
-      </div>
-    `;
-  }).join('');
-
-  container.innerHTML = html;
+    </article>
+  `).join('');
 }
 
-/* ========== init ========== */
-(async function init() {
-  try {
-    const loads = await fetchLoads();
-    renderLoads(loads);
-    window.LOADS = loads; // handy for quick console checks
-  } catch (err) {
-    console.error('Failed to load/render loads:', err);
-    const container = document.querySelector('#loads-list') || document.querySelector('.loads-list') || document.body;
-    const div = document.createElement('div');
-    div.className = 'error';
-    div.textContent = 'Error loading loads.';
-    container.appendChild(div);
-  }
-})();
+function applyFilters(){
+  const term = ($('#q')?.value||'').toLowerCase();
+  const comm = ($('#commodity')?.value||'').toLowerCase();
+  const list = LOADS.filter(l => {
+    const hay = (l.item+' '+l.from_city+' '+l.to_city+' '+(l.commodity||'')).toLowerCase();
+    const okQ = !term || hay.includes(term);
+    const okC = !comm || (l.commodity||'').toLowerCase()===comm;
+    return okQ && okC;
+  });
+  render(list);
+}
+
+function openView(index){
+  const l = LOADS[index]; if(!l) return;
+  const box = $('#viewContent');
+  box.innerHTML = `
+    <div class="title">${l.item}</div>
+    <div class="meta" style="margin-bottom:6px"><strong>Route:</strong> ${l.from_city} → ${l.to_city}</div>
+    <div class="meta"><strong>Miles:</strong> ${fmt(l.miles)}</div>
+    <div class="meta"><strong>Available:</strong> ${l.date}</div>
+    ${l.price ? `<div class="price" style="margin:8px 0">${l.price}</div>` : ''}
+    ${l.commodity ? `<div class="meta"><strong>Commodity:</strong> ${l.commodity}</div>` : ''}
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn secondary" onclick="closeView()">Close</button>
+      <button class="btn" onclick="bid()">Bid</button>
+    </div>
+  `;
+  $('#viewModal').classList.add('open');
+}
+function closeView(){ $('#viewModal').classList.remove('open'); }
+
+function bid(){
+  if(!TOKEN){ openAuth(); return; }
+  alert('Bid submitted');
+}
+function openAuth(){ $('#authModal').classList.add('open'); }
+function closeAuth(){ $('#authModal').classList.remove('open'); }
+function signin(){
+  const err = $('#authError');
+  if(err){ err.textContent = 'Invalid username or password.'; }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Reveal Admin link only with ?admin=true
+  try{
+    const url = new URL(window.location.href);
+    const adminFlag = url.searchParams.get('admin');
+    const adminLink = document.getElementById('adminLink');
+    if(adminLink){ adminLink.style.display = (adminFlag === 'true') ? 'inline' : 'none'; }
+  }catch(e){}
+  ['q','commodity'].forEach(id => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.addEventListener(el.tagName==='SELECT' ? 'change' : 'input', applyFilters);
+  });
+  loadData();
+});
