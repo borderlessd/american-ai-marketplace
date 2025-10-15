@@ -1,4 +1,3 @@
-
 let LOADS = [];
 let TOKEN = localStorage.getItem('aim_token')||'';
 const $ = (q, el=document) => el.querySelector(q);
@@ -6,10 +5,13 @@ function fmt(n){return new Intl.NumberFormat().format(n);}
 
 async function loadData(){
   try{
-    const res = await fetch('assets/loads.json?ts=' + Date.now());
+    const res = await fetch('/assets/loads.json?ts=' + Date.now());
     const data = await res.json();
     LOADS = Array.isArray(data) ? data : (data.loads||[]);
-  }catch(e){ console.error('Failed to load loads.json', e); LOADS = []; }
+  }catch(e){
+    console.error('Failed to load loads.json', e);
+    LOADS = [];
+  }
   render(LOADS);
 }
 
@@ -17,7 +19,7 @@ function render(list){
   const grid = $('#grid'); if(!grid) return;
   grid.innerHTML = list.map((l, idx) => `
     <article class="card">
-      <div class="route">${l.from_city} -> ${l.to_city} <span class="status ${l.status||'open'}">${(l.status||'open').toUpperCase()}</span></div>
+      <div class="route">${l.from_city} → ${l.to_city} <span class="status ${l.status||'open'}">${(l.status||'open').toUpperCase()}</span></div>
       <div class="meta"><strong>Item:</strong> ${l.item}</div>
       <div class="meta"><strong>Miles:</strong> ${fmt(l.miles)} • <strong>Available:</strong> ${l.date}</div>
       <div class="price" style="margin:8px 0">${l.price||''}</div>
@@ -46,7 +48,7 @@ function openView(index){
   const box = $('#viewContent');
   box.innerHTML = `
     <div class="title">${l.item}</div>
-    <div class="meta" style="margin-bottom:6px"><strong>Route:</strong> ${l.from_city} -> ${l.to_city}</div>
+    <div class="meta" style="margin-bottom:6px"><strong>Route:</strong> ${l.from_city} → ${l.to_city}</div>
     <div class="meta"><strong>Miles:</strong> ${fmt(l.miles)}</div>
     <div class="meta"><strong>Available:</strong> ${l.date}</div>
     ${l.price ? `<div class="price" style="margin:8px 0">${l.price}</div>` : ''}
@@ -72,6 +74,7 @@ function signin(){
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Reveal Admin link only with ?admin=true
   try{
     const url = new URL(window.location.href);
     const adminFlag = url.searchParams.get('admin');
