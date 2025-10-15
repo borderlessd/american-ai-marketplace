@@ -7,7 +7,6 @@
 # Force a rewrite of /assets/loads.json to your Google Sheet JSON.
 [[redirects]]
   from = "/assets/loads.json"
-  to = "https://script.google.com/macros/s/AKfycbzXfnH8m0LxiQ1rkqf7AJt9qmp1sok722xYMmwdS96RKwgWBOt2xLrBc-1FPTnIbHP91A/exec"
+  to = "https://script.google.com/macros/s/AKfycbzXfnH8m0LxiQ1rkqf7AJt9qmp1sok722xYMmwdS96RKwgWBOt2xLrBc-1FPTnIbHP91A/exec?mode=compat"
   status = 200
   force = true
-
