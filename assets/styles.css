@@ -1,29 +1,30 @@
-:root{{--navy:#0B2A4A;--red:#C1121F;--slate:#334155;--bg:#f6f8fb}}
-*{{box-sizing:border-box}}html,body{{margin:0;font-family:Inter,system-ui,Arial,sans-serif;background:var(--bg);color:var(--slate)}}
-.nav{{position:sticky;top:0;background:#fff;border-bottom:1px solid #e6eaf0;display:flex;align-items:center;justify-content:space-between;padding:12px 16px}}
-.nav a{{color:var(--navy);text-decoration:none;font-weight:800;margin:0 8px}}
-.hero{{background:linear-gradient(135deg,#C1121F 0%,#0B2A4A 100%);color:#fff;padding:48px 16px;text-align:center}}
-.hero h1{{margin:0 0 8px}}
-.wrap{{max-width:1100px;margin:0 auto;padding:16px}}
-.controls{{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 16px}}
-.input{{padding:10px 12px;border:1px solid #d6dbe3;border-radius:10px;min-width:240px;background:#fff}}
-.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}}
-.card{{background:#fff;border:1px solid #e8edf4;border-radius:12px;padding:14px;box-shadow:0 4px 14px rgba(0,0,0,.06)}}
-.route{{font-weight:900;color:#0B2A4A}}
-.meta{{font-size:13px;color:#64748b}}
-.price{{color:#C1121F;font-weight:900}}
-.status{{font-size:12px;font-weight:800;border-radius:999px;padding:4px 8px;margin-left:6px}}
-.status.open{{background:#d1fae5;color:#065f46}}
-.status.pending{{background:#fef3c7;color:#92400e}}
-.status.awarded{{background:#dbeafe;color:#1e40af}}
-.btn{{background:#C1121F;color:#fff;padding:10px 14px;border-radius:10px;border:0;font-weight:800;cursor:pointer}}
-.btn.secondary{{background:#0B2A4A}}
-.footer{{border-top:1px solid #e6eaf0;background:#fff;color:#6b7280;font-size:12px}}
-.footer .wrap{{padding:12px 16px}}
-.badge{{display:inline-block;background:#fff;color:#0B2A4A;border:1px solid #e6eaf0;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800;margin:4px}}
-.modal{{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px}}
-.modal.open{{display:flex}}
-.panel{{background:#fff;border:1px solid #e8edf4;border-radius:12px;padding:16px;max-width:520px;width:100%}}
-.panel .title{{color:#0B2A4A;font-weight:900;margin-bottom:6px;font-size:20px}}
-.error{{color:#b91c1c;font-size:12px;margin-top:6px}}
-.footer-note{{font-size:12px;color:#6b7280}}
+:root { --navy:#0B2A4A; --red:#C1121F; --slate:#334155; --bg:#f6f8fb }
+* { box-sizing:border-box }
+html,body { margin:0; font-family:Inter,system-ui,Arial,sans-serif; background:var(--bg); color:var(--slate) }
+.nav { position:sticky; top:0; background:#fff; border-bottom:1px solid #e6eaf0; display:flex; align-items:center; justify-content:space-between; padding:12px 16px }
+.nav a { color:var(--navy); text-decoration:none; font-weight:800; margin:0 8px }
+.hero { background:linear-gradient(135deg,#C1121F 0%,#0B2A4A 100%); color:#fff; padding:48px 16px; text-align:center }
+.hero h1 { margin:0 0 8px }
+.wrap { max-width:1100px; margin:0 auto; padding:16px }
+.controls { display:flex; gap:10px; flex-wrap:wrap; margin:8px 0 16px }
+.input { padding:10px 12px; border:1px solid #d6dbe3; border-radius:10px; min-width:240px; background:#fff }
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px }
+.card { background:#fff; border:1px solid #e8edf4; border-radius:12px; padding:14px; box-shadow:0 4px 14px rgba(0,0,0,.06) }
+.route { font-weight:900; color:var(--navy) }
+.meta { font-size:13px; color:#64748b }
+.price { color:var(--red); font-weight:900 }
+.status { font-size:12px; font-weight:800; border-radius:999px; padding:4px 8px; margin-left:6px }
+.status.open { background:#d1fae5; color:#065f46 }
+.status.pending { background:#fef3c7; color:#92400e }
+.status.awarded { background:#dbeafe; color:#1e40af }
+.btn { background:var(--red); color:#fff; padding:10px 14px; border-radius:10px; border:0; font-weight:800; cursor:pointer }
+.btn.secondary { background:var(--navy) }
+.footer { border-top:1px solid #e6eaf0; background:#fff; color:#6b7280; font-size:12px }
+.footer .wrap { padding:12px 16px }
+.badge { display:inline-block; background:#fff; color:var(--navy); border:1px solid #e6eaf0; border-radius:999px; padding:6px 10px; font-size:12px; font-weight:800; margin:4px }
+.modal { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; padding:16px }
+.modal.open { display:flex }
+.panel { background:#fff; border:1px solid #e8edf4; border-radius:12px; padding:16px; max-width:520px; width:100% }
+.panel .title { color:var(--navy); font-weight:900; margin-bottom:6px; font-size:20px }
+.error { color:#b91c1c; font-size:12px; margin-top:6px }
+.footer-note { font-size:12px; color:#6b7280 }
