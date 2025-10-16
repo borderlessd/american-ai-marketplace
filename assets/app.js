@@ -375,3 +375,152 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadData();
 });
+
+/* =========================
+   APPEND-ONLY PATCH
+   - Adds centered loading box (overlay) during data fetch
+   - Extends Dark Mode to header/filters/pagers
+   - Replaces setAutoRefresh to also show overlay during refresh
+   ========================= */
+(function(){
+  // ---------- OVERLAY (little box) ----------
+  const OVERLAY_ID = 'aim-loader-overlay';
+  const OVERBOX_ID = 'aim-loader-box';
+  let overlayCount = 0;
+
+  function ensureOverlay(){
+    if (document.getElementById(OVERLAY_ID)) return;
+    const wrap = document.createElement('div');
+    wrap.id = OVERLAY_ID;
+    wrap.style.cssText = `
+      position:fixed; inset:0; background:rgba(0,0,0,.35);
+      display:none; align-items:center; justify-content:center;
+      z-index:99999; font-family:inherit;
+    `;
+    const box = document.createElement('div');
+    box.id = OVERBOX_ID;
+    box.style.cssText = `
+      background:#fff; padding:14px 18px; border-radius:8px;
+      box-shadow:0 4px 20px rgba(0,0,0,.25); min-width:240px; text-align:center;
+      color:#111;
+    `;
+    box.innerHTML = `
+      <div style="font-weight:600; margin-bottom:6px;">Loading loads…</div>
+      <div style="font-size:12px; opacity:.8;">This can take a moment</div>
+    `;
+    wrap.appendChild(box);
+    document.body.appendChild(wrap);
+  }
+  function overlayStart(){
+    ensureOverlay();
+    overlayCount++;
+    const el = document.getElementById(OVERLAY_ID);
+    if (el) el.style.display = 'flex';
+  }
+  function overlayDone(){
+    overlayCount = Math.max(0, overlayCount - 1);
+    if (overlayCount === 0) {
+      const el = document.getElementById(OVERLAY_ID);
+      if (el) el.style.display = 'none';
+    }
+  }
+
+  // Wrap loadData to show overlay box as well as the top bar
+  if (typeof window.loadData === 'function' && !window.loadData.__wrappedOverlayBox) {
+    const _ld = window.loadData;
+    window.loadData = async function(){
+      try { overlayStart(); } catch(e){}
+      try { return await _ld(); }
+      finally { try { overlayDone(); } catch(e){} }
+    };
+    window.loadData.__wrappedOverlayBox = true;
+  }
+
+  // ---------- DARK MODE header/filters/pagers ----------
+  // Extend the dark styles so your header row, filters and pagers flip too
+  (function extendDarkStyles(){
+    const EXTRA_ID = 'aim-dark-extra-style';
+    if (document.getElementById(EXTRA_ID)) return;
+    const css = `
+      :root.dark header, :root.dark .header, :root.dark #header,
+      :root.dark nav, :root.dark .toolbar, :root.dark .filters,
+      :root.dark #pager-top, :root.dark #pager-bottom, :root.dark .pager,
+      :root.dark .loads-filters, :root.dark .controls {
+        background:#12171d; color:#e6e6e6;
+        border-color:#2a3441;
+      }
+      :root.dark #pager-top select, :root.dark #pager-bottom select,
+      :root.dark #pager-top button, :root.dark #pager-bottom button,
+      :root.dark .filters select, :root.dark .filters input {
+        background:#1b222b; color:#e6e6e6; border-color:#334052;
+      }
+      :root.dark #${OVERBOX_ID} {
+        background:#171c22; color:#e6e6e6; box-shadow:0 4px 20px rgba(0,0,0,.45);
+      }
+    `.trim();
+    const style = document.createElement('style');
+    style.id = EXTRA_ID;
+    style.textContent = css;
+    document.head.appendChild(style);
+
+    // If dark mode is already on, ensure styles applied
+    if (document.documentElement.classList.contains('dark')) {
+      // no-op; styles take effect automatically
+    }
+  })();
+
+  // ---------- Auto-refresh with overlay ----------
+  // Replace setAutoRefresh so refresh fetches also show the little box.
+  // Uses the same logic as your existing setAutoRefresh, plus overlayStart/Done.
+  if (typeof window.setAutoRefresh === 'function') {
+    // keep reference to any existing interval var in outer scope
+    let _getRefreshTimerRef = () => {
+      try { return eval('refreshTimer'); } catch(e){ return null; }
+    };
+    window.setAutoRefresh = function(val /* '0'|'30'|'60'|'120' */){
+      localStorage.setItem('aim_auto_refresh', String(val || '0'));
+      // clear previous interval if we can access it
+      try {
+        if (window.refreshTimer) { clearInterval(window.refreshTimer); window.refreshTimer = null; }
+        else {
+          const rt = _getRefreshTimerRef();
+          if (rt) { clearInterval(rt); try{eval('refreshTimer = null');}catch(e){} }
+        }
+      } catch(e){}
+
+      const seconds = parseInt(val, 10) || 0;
+      if (!seconds) return;
+
+      // Create a fresh interval that mirrors your code, with overlay
+      window.refreshTimer = setInterval(async () => {
+        overlayStart();
+        try {
+          // (Copied from your existing auto-refresh logic)
+          const res = await fetch('/assets/loads.json?ts=' + Date.now(), {cache:'no-store', credentials:'omit'});
+          const data = await res.json();
+          const arr  = Array.isArray(data) ? data : (data.loads||[]);
+          window.LOADS = arr.map((l,i)=>({...l, __i:i}));
+
+          const term = ($('#q')?.value||'').toLowerCase();
+          const comm = ($('#commodity')?.value||'').toLowerCase();
+          const filtered = window.LOADS.filter(l => {
+            const hay = (String(l.item||'')+' '+String(l.from_city||'')+' '+String(l.to_city||'')+' '+String(l.commodity||'')).toLowerCase();
+            const okQ = !term || hay.includes(term);
+            const okC = !comm || (String(l.commodity||'').toLowerCase()===comm);
+            return okQ && okC;
+          });
+
+          const oldPage = STATE.page;
+          STATE.filtered = filtered;
+          const last = Math.max(1, Math.ceil(filtered.length / STATE.pageSize));
+          STATE.page = Math.min(oldPage, last);
+          drawPage();
+        } catch(e){
+          console.warn('Auto-refresh failed:', e);
+        } finally {
+          overlayDone();
+        }
+      }, seconds * 1000);
+    };
+  }
+})();
