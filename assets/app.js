@@ -561,3 +561,42 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadData();
 });
+
+/* ===== APPEND-ONLY: use ▲ / ▼ for sort direction ===== */
+(function iconizeSortDir(){
+  function setIcon(where){
+    const btn = document.getElementById(`sortdir-${where}`);
+    if (!btn || !window.STATE) return;
+    const asc = (STATE.sort?.dir === 'asc');
+    btn.textContent = asc ? '▲' : '▼';
+    btn.setAttribute('aria-label', asc ? 'Ascending (low → high)' : 'Descending (high → low)');
+    btn.title = asc ? 'Ascending (low → high)' : 'Descending (high → low)';
+    // make sure the button width doesn't jump around
+    btn.style.minWidth = '2.2em';
+    btn.style.textAlign = 'center';
+    btn.style.lineHeight = '1';
+  }
+
+  // Patch renderPager so after it builds, we switch the labels to icons
+  if (typeof window.renderPager === 'function' && !window.renderPager.__iconHooked) {
+    const _renderPager = window.renderPager;
+    window.renderPager = function(where){
+      const res = _renderPager(where);
+      // defer to after DOM updates
+      setTimeout(() => setIcon(where), 0);
+      return res;
+    };
+    window.renderPager.__iconHooked = true;
+  }
+
+  // Also run after initial drawPage (and in case pager already exists)
+  function applyNow(){
+    setIcon('top');
+    setIcon('bottom');
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(applyNow, 0));
+  } else {
+    setTimeout(applyNow, 0);
+  }
+})();
