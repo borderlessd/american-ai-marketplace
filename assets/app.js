@@ -1,486 +1,319 @@
-let LOADS = [];
-let TOKEN = localStorage.getItem('aim_token')||'';
-const $ = (q, el=document) => el.querySelector(q);
-function fmt(n){return new Intl.NumberFormat().format(n);}
-
-async function loadData(){
-  try{
-    const res = await fetch('/assets/loads.json?ts=' + Date.now());
-    const data = await res.json();
-    LOADS = Array.isArray(data) ? data : (data.loads||[]);
-  }catch(e){
-    console.error('Failed to load loads.json', e);
-    LOADS = [];
-  }
-  render(LOADS);
-}
-
-function render(list){
-  const grid = $('#grid'); if(!grid) return;
-  grid.innerHTML = list.map((l, idx) => `
-    <article class="card">
-      <div class="route">${l.from_city} → ${l.to_city} <span class="status ${l.status||'open'}">${(l.status||'open').toUpperCase()}</span></div>
-      <div class="meta"><strong>Item:</strong> ${l.item}</div>
-      <div class="meta"><strong>Miles:</strong> ${fmt(l.miles)} • <strong>Available:</strong> ${l.date}</div>
-      <div class="price" style="margin:8px 0">${l.price||''}</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn secondary" onclick="openView(${idx})">View</button>
-        <button class="btn" onclick="bid()">Bid</button>
-      </div>
-    </article>
-  `).join('');
-}
-
-function applyFilters(){
-  const term = ($('#q')?.value||'').toLowerCase();
-  const comm = ($('#commodity')?.value||'').toLowerCase();
-  const list = LOADS.filter(l => {
-    const hay = (l.item+' '+l.from_city+' '+l.to_city+' '+(l.commodity||'')).toLowerCase();
-    const okQ = !term || hay.includes(term);
-    const okC = !comm || (l.commodity||'').toLowerCase()===comm;
-    return okQ && okC;
-  });
-  render(list);
-}
-
-function openView(index){
-  const l = LOADS[index]; if(!l) return;
-  const box = $('#viewContent');
-  box.innerHTML = `
-    <div class="title">${l.item}</div>
-    <div class="meta" style="margin-bottom:6px"><strong>Route:</strong> ${l.from_city} → ${l.to_city}</div>
-    <div class="meta"><strong>Miles:</strong> ${fmt(l.miles)}</div>
-    <div class="meta"><strong>Available:</strong> ${l.date}</div>
-    ${l.price ? `<div class="price" style="margin:8px 0">${l.price}</div>` : ''}
-    ${l.commodity ? `<div class="meta"><strong>Commodity:</strong> ${l.commodity}</div>` : ''}
-    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-      <button class="btn secondary" onclick="closeView()">Close</button>
-      <button class="btn" onclick="bid()">Bid</button>
-    </div>
-  `;
-  $('#viewModal').classList.add('open');
-}
-function closeView(){ $('#viewModal').classList.remove('open'); }
-
-function bid(){
-  if(!TOKEN){ openAuth(); return; }
-  alert('Bid submitted');
-}
-function openAuth(){ $('#authModal').classList.add('open'); }
-function closeAuth(){ $('#authModal').classList.remove('open'); }
-function signin(){
-  const err = $('#authError');
-  if(err){ err.textContent = 'Invalid username or password.'; }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  // Reveal Admin link only with ?admin=true
-  try{
-    const url = new URL(window.location.href);
-    const adminFlag = url.searchParams.get('admin');
-    const adminLink = document.getElementById('adminLink');
-    if(adminLink){ adminLink.style.display = (adminFlag === 'true') ? 'inline' : 'none'; }
-  }catch(e){}
-  ['q','commodity'].forEach(id => {
-    const el = document.getElementById(id);
-    if(!el) return;
-    el.addEventListener(el.tagName==='SELECT' ? 'change' : 'input', applyFilters);
-  });
-  loadData();
-});
-
-/* ---- NON-DESTRUCTIVE TEXT PATCH (append-only) ---- */
-(function () {
-  function splitMilesAvailableInPlace(root) {
-    // Find lines like: "Miles: 100 • Available: 2025-10-20"
-    // Replace with:    "Miles: 100<br>First Available Date: 2025-10-20"
-    const els = root.querySelectorAll('.meta, .details, .info');
-    els.forEach(el => {
-      const txt = (el.textContent || '').trim();
-      if (!txt) return;
-      // must contain both labels and a separator (• or -)
-      if (/Miles:\s*/i.test(txt) && /Available:\s*/i.test(txt) && (txt.includes('•') || / - /.test(txt))) {
-        const milesMatch = txt.match(/Miles:\s*([^•\-]+)/i);
-        const availMatch = txt.match(/Available:\s*(.*)$/i);
-        const milesVal = milesMatch ? milesMatch[1].trim() : '';
-        const availVal = availMatch ? availMatch[1].trim() : '';
-        // Keep the SAME element; just swap its HTML to add a <br>
-        el.innerHTML = `Miles: ${milesVal}<br>First Available Date: ${availVal}`;
-      }
-    });
-  }
-
-  function labelPriceInPlace(root) {
-    // Prepend "Price: " INSIDE the existing .price element so it keeps the same font/size
-    root.querySelectorAll('.price').forEach(el => {
-      const t = (el.textContent || '').trim();
-      if (!t) return;
-      if (!/^price:\s*/i.test(t)) {
-        // Use innerText to preserve existing styling; set once
-        el.textContent = `Price: ${t}`;
-      }
-    });
-  }
-
-  function applyPatch() {
-    const scope = document;
-    splitMilesAvailableInPlace(scope);
-    labelPriceInPlace(scope);
-  }
-
-  // Run when DOM is ready and a bit after (for async render)
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', applyPatch);
-  } else {
-    applyPatch();
-  }
-  setTimeout(applyPatch, 300);
-  setTimeout(applyPatch, 900);
-
-  // If your list re-renders dynamically, re-apply on mutations
-  const mo = new MutationObserver(() => applyPatch());
-  mo.observe(document.body, { childList: true, subtree: true });
-})();
+/* assets/app.js — FULL REPLACE (safe & complete)
+   - Fetches /assets/loads.json with cache-busting
+   - Renders cards with your theme classes (load-card, route, meta, price, status, actions)
+   - Labels: Item, Miles, First Available Date, Price
+   - Loader overlay (lightweight, never traps)
+   - Pagination + page-size (10/25/50/100)
+   - Toolbar positioned to the RIGHT of #sort-commodity (if present)
+*/
 
 /* =========================
-   LIGHTWEIGHT Loader + Pagination (append-only, safe)
+   Helpers
    ========================= */
-(function(){
-  // --- tiny helpers ---
-  const $  = (sel, root=document) => root.querySelector(sel);
-  const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
-
-  // Try your usual container/classes; fallbacks kept
-  function findContainer() {
-    return $('#loads-list') || $('.loads-list') || $('#loads') || $('.cards') || document.body;
+function formatPrice(v) {
+  const n = Number(v || 0);
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+  } catch {
+    return `$${(Math.round(n) || 0).toString()}`;
   }
-  function findCards() {
-    let nodes = $$('.load-card');
-    if (nodes.length) return nodes;
-    nodes = $$('.card');
-    if (nodes.length) return nodes;
-    return $$('.listing, .entry, .item');
-  }
+}
+function UC(x) { return String(x || '').trim().toUpperCase(); }
+const $  = (sel, root=document) => root.querySelector(sel);
+const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
-  // --- overlay ---
-  const LOADER_ID = 'loads-loader-overlay';
-  function showLoader() {
-    if (document.getElementById(LOADER_ID)) return;
-    const d = document.createElement('div');
-    d.id = LOADER_ID;
-    d.style.cssText = `
-      position:fixed; inset:0; background:rgba(0,0,0,.35);
-      display:flex; align-items:center; justify-content:center;
-      z-index:99999; font-family:inherit;
-    `;
-    d.innerHTML = `
-      <div style="background:#fff; padding:14px 18px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,.25); min-width:240px; text-align:center;">
-        <div style="font-weight:600; margin-bottom:6px;">Loading loads…</div>
-        <div style="font-size:12px; opacity:.8;">This can take a moment</div>
-      </div>`;
-    document.body.appendChild(d);
-  }
-  function hideLoader() {
-    const d = document.getElementById(LOADER_ID);
-    if (d && d.parentNode) d.parentNode.removeChild(d);
-  }
+/* =========================
+   Data (normalize to theme keys)
+   ========================= */
+async function fetchLoads() {
+  const url = `/assets/loads.json?v=${Date.now()}`; // cache-bust so Sheet edits show fast
+  const res = await fetch(url, { cache: 'no-store', credentials: 'omit' });
+  if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
+  const arr = await res.json();
+  if (!Array.isArray(arr)) return [];
+  return arr.map(r => ({
+    id:        r.id ?? r.load_number ?? '',
+    from_city: r.from_city ?? r.from ?? r.origin ?? r.pickup_city ?? '',
+    to_city:   r.to_city   ?? r.to   ?? r.destination ?? r.dropoff_city ?? '',
+    date:      r.date ?? r.availableDate ?? r.available ?? r.pickupDate ?? r.ready ?? '',
+    item:      r.item ?? r.vehicle ?? '',
+    miles:     Number(r.miles ?? r.distance ?? 0) || 0,
+    price:     Number(r.price ?? r.amount ?? r.rate ?? 0) || 0,
+    status:    String(r.status ?? 'open'),
+    notes:     r.notes ?? '',
+    commodity: r.commodity ?? r.item ?? r.vehicle ?? ''
+  }));
+}
 
-  // --- pagination UI ---
-  const BAR_ID = 'loads-pager-toolbar';
-  const state = { page: 1, pageSize: 25, total: 0 };
+/* =========================
+   Rendering
+   ========================= */
+function getContainer() {
+  return $('#loads-list') || $('.loads-list') || $('#loads') || $('.cards') || document.body;
+}
 
-  function buildToolbar(container) {
-    if (document.getElementById(BAR_ID)) return;
-    const wrap = document.createElement('div');
-    wrap.id = BAR_ID;
-    wrap.style.cssText = `
-      display:flex; gap:10px; align-items:center; justify-content:space-between;
-      padding:8px 0; margin-bottom:8px; font-family:inherit;
-    `;
-    const left = document.createElement('div');
-    left.innerHTML = `
-      <label style="font-size:14px; margin-right:6px;">Show per page:</label>
-      <select id="loads-pp" style="font:inherit; padding:4px 6px;">
-        <option value="10">10</option>
-        <option value="25" selected>25</option>
-        <option value="50">50</option>
-        <option value="100">100</option>
-      </select>
-    `;
-    const right = document.createElement('div');
-    right.innerHTML = `
-      <button id="loads-prev" style="font:inherit; padding:4px 8px;">Prev</button>
-      <span id="loads-pageinfo" style="margin:0 8px; font-size:14px;">Page 1 / 1</span>
-      <button id="loads-next" style="font:inherit; padding:4px 8px;">Next</button>
-    `;
-
-    wrap.appendChild(left);
-    wrap.appendChild(right);
-    // Insert above the list
-    const parent = container.parentNode || document.body;
-    parent.insertBefore(wrap, container);
+function renderLoads(loads) {
+  const container = getContainer();
+  if (!loads.length) {
+    container.innerHTML = `<div class="empty">No loads available.</div>`;
+    return;
   }
 
-  function updatePageInfo() {
-    const info = $('#loads-pageinfo');
-    if (!info) return;
-    const last = Math.max(1, Math.ceil(state.total / state.pageSize));
-    if (state.page > last) state.page = last;
-    info.textContent = `Page ${state.page} / ${last}`;
-    const prev = $('#loads-prev'), next = $('#loads-next');
-    if (prev) prev.disabled = state.page <= 1;
-    if (next) next.disabled = state.page >= last;
+  const html = loads.map(l => `
+    <div class="load-card">
+      <div class="route">
+        ${l.from_city || '—'} → ${l.to_city || '—'}
+        <span class="status">${UC(l.status)}</span>
+      </div>
+      <div class="meta">Item: ${l.item || '—'}</div>
+      <div class="meta">Miles: ${Number.isFinite(l.miles) ? l.miles : '—'}</div>
+      <div class="meta">First Available Date: ${l.date || '—'}</div>
+      <div class="price">Price: ${formatPrice(l.price)}</div>
+      <div class="actions">
+        <a class="btn view" href="#" data-id="${l.id}">View</a>
+        <a class="btn bid" href="#" data-id="${l.id}">Bid</a>
+      </div>
+    </div>
+  `).join('');
+
+  container.innerHTML = html;
+}
+
+/* =========================
+   Loader (lightweight; never traps)
+   ========================= */
+const LOADER_ID = 'loads-loader-overlay';
+function showLoader() {
+  if (document.getElementById(LOADER_ID)) return;
+  const d = document.createElement('div');
+  d.id = LOADER_ID;
+  d.style.cssText = `
+    position:fixed; inset:0; background:rgba(0,0,0,.35);
+    display:flex; align-items:center; justify-content:center;
+    z-index:99999; font-family:inherit;
+  `;
+  d.innerHTML = `
+    <div style="background:#fff; padding:14px 18px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,.25); min-width:240px; text-align:center;">
+      <div style="font-weight:600; margin-bottom:6px;">Loading loads…</div>
+      <div style="font-size:12px; opacity:.8;">This can take a moment</div>
+    </div>`;
+  document.body.appendChild(d);
+}
+function hideLoader() {
+  const d = document.getElementById(LOADER_ID);
+  if (d && d.parentNode) d.parentNode.removeChild(d);
+}
+
+/* =========================
+   Pagination + Page-size
+   ========================= */
+const PAGER_ID  = 'loads-pager-toolbar';
+const HOLDER_ID = 'loads-pager-holder';
+const state = { page: 1, pageSize: 25, total: 0 };
+
+function findCards() {
+  let nodes = $$('.load-card', getContainer());
+  if (nodes.length) return nodes;
+  nodes = $$('.card', getContainer());
+  if (nodes.length) return nodes;
+  return $$('.listing, .entry, .item', getContainer());
+}
+
+function buildToolbarAboveList() {
+  if (document.getElementById(PAGER_ID)) return document.getElementById(PAGER_ID);
+
+  const bar = document.createElement('div');
+  bar.id = PAGER_ID;
+  bar.style.cssText = `
+    display:flex; gap:10px; align-items:center; justify-content:space-between;
+    padding:8px 0; margin-bottom:8px; font-family:inherit;
+  `;
+  const left = document.createElement('div');
+  left.innerHTML = `
+    <label style="font-size:14px; margin-right:6px;">Show per page:</label>
+    <select id="loads-pp" style="font:inherit; padding:4px 6px;">
+      <option value="10">10</option>
+      <option value="25" selected>25</option>
+      <option value="50">50</option>
+      <option value="100">100</option>
+    </select>
+  `;
+  const right = document.createElement('div');
+  right.innerHTML = `
+    <button id="loads-prev" style="font:inherit; padding:4px 8px;">Prev</button>
+    <span id="loads-pageinfo" style="margin:0 8px; font-size:14px;">Page 1 / 1</span>
+    <button id="loads-next" style="font:inherit; padding:4px 8px;">Next</button>
+  `;
+  bar.appendChild(left);
+  bar.appendChild(right);
+
+  // Insert just above the list (default position; we’ll move it next to sort if found)
+  const container = getContainer();
+  const parent = container.parentNode || document.body;
+  parent.insertBefore(bar, container);
+  return bar;
+}
+
+function moveToolbarNextToSort() {
+  const sort = document.getElementById('sort-commodity') ||
+               document.querySelector('.commodity-sort, [data-role="commodity-sort"], select[name="commodity"]');
+  const bar  = document.getElementById(PAGER_ID);
+  if (!sort || !bar) return false;
+
+  // Use the sort's nearest row-like parent (or its parent)
+  const row = sort.closest('.filters, .toolbar, .header, .controls, .filter-row') || sort.parentElement;
+  if (!row) return false;
+
+  // Make it a flex row (inline style only; we don’t touch your CSS files)
+  const prev = row.getAttribute('style') || '';
+  if (!/display\s*:\s*flex/i.test(prev)) {
+    row.style.display    = 'flex';
+    row.style.alignItems = row.style.alignItems || 'center';
+    row.style.gap        = row.style.gap || '10px';
+    row.style.flexWrap   = row.style.flexWrap || 'wrap';
   }
 
-  function applyPagination() {
-    const cards = findCards();
-    state.total = cards.length;
-    const start = (state.page - 1) * state.pageSize;
-    const end   = start + state.pageSize;
-    cards.forEach((el, i) => { el.style.display = (i >= start && i < end) ? '' : 'none'; });
-    updatePageInfo();
+  // Create a right-aligned holder and move bar into it
+  let holder = document.getElementById(HOLDER_ID);
+  if (!holder) {
+    holder = document.createElement('div');
+    holder.id = HOLDER_ID;
+    holder.style.display = 'flex';
+    holder.style.alignItems = 'center';
+    holder.style.gap = '10px';
+    holder.style.marginLeft = 'auto'; // push to right
+    row.appendChild(holder);
   }
+  if (!holder.contains(bar)) holder.appendChild(bar);
 
-  function wireEvents() {
-    const pp = $('#loads-pp'), prev = $('#loads-prev'), next = $('#loads-next');
-    if (pp && !pp.__wired) {
-      pp.__wired = true;
-      pp.addEventListener('change', () => { state.pageSize = parseInt(pp.value,10) || 25; state.page = 1; applyPagination(); });
-    }
-    if (prev && !prev.__wired) {
-      prev.__wired = true;
-      prev.addEventListener('click', () => { if (state.page > 1) { state.page--; applyPagination(); findContainer().scrollIntoView({behavior:'smooth', block:'start'}); } });
-    }
-    if (next && !next.__wired) {
-      next.__wired = true;
-      next.addEventListener('click', () => {
-        const last = Math.max(1, Math.ceil(state.total / state.pageSize));
-        if (state.page < last) { state.page++; applyPagination(); findContainer().scrollIntoView({behavior:'smooth', block:'start'}); }
-      });
-    }
+  // Compact bar in header context
+  bar.style.margin = '0';
+  bar.style.display = 'flex';
+  bar.style.alignItems = 'center';
+  bar.style.gap = '10px';
+  const label = bar.querySelector('label');
+  const ppSel = bar.querySelector('#loads-pp');
+  if (label) label.style.marginRight = '6px';
+  if (ppSel) { ppSel.style.minWidth = '64px'; ppSel.style.padding = '4px 6px'; }
+
+  return true;
+}
+
+function updatePageInfo() {
+  const info = document.getElementById('loads-pageinfo');
+  if (!info) return;
+  const lastPage = Math.max(1, Math.ceil(state.total / state.pageSize));
+  if (state.page > lastPage) state.page = lastPage;
+  info.textContent = `Page ${state.page} / ${lastPage}`;
+  const prev = document.getElementById('loads-prev');
+  const next = document.getElementById('loads-next');
+  if (prev) prev.disabled = (state.page <= 1);
+  if (next) next.disabled = (state.page >= lastPage);
+}
+
+function applyPagination() {
+  const cards = findCards();
+  state.total = cards.length;
+  const start = (state.page - 1) * state.pageSize;
+  const end   = start + state.pageSize;
+  cards.forEach((el, i) => {
+    el.style.display = (i >= start && i < end) ? '' : 'none';
+  });
+  updatePageInfo();
+}
+
+function wirePagerEvents() {
+  const pp = document.getElementById('loads-pp');
+  const prev = document.getElementById('loads-prev');
+  const next = document.getElementById('loads-next');
+  if (pp && !pp.__wired) {
+    pp.__wired = true;
+    pp.addEventListener('change', () => {
+      state.pageSize = parseInt(pp.value, 10) || 25;
+      state.page = 1;
+      applyPagination();
+    });
   }
+  if (prev && !prev.__wired) {
+    prev.__wired = true;
+    prev.addEventListener('click', () => {
+      if (state.page > 1) {
+        state.page--;
+        applyPagination();
+        getContainer().scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }
+  if (next && !next.__wired) {
+    next.__wired = true;
+    next.addEventListener('click', () => {
+      const lastPage = Math.max(1, Math.ceil(state.total / state.pageSize));
+      if (state.page < lastPage) {
+        state.page++;
+        applyPagination();
+        getContainer().scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }
+}
 
-  // --- initialize when cards exist (no heavy observers) ---
-  function initOnce() {
-    const container = findContainer();
-    const cards = findCards();
-    if (!container || !cards.length) return false;
+/* =========================
+   Init
+   ========================= */
+(async function init() {
+  try {
+    showLoader();
 
-    hideLoader();
-    buildToolbar(container);
-    wireEvents();
+    // Fetch & render
+    const loads = await fetchLoads();
+    renderLoads(loads);
+
+    // Expose for quick diagnose
+    window.LOADS = loads;
+
+    // Build toolbar and place it near the sort (if present)
+    buildToolbarAboveList();
+    moveToolbarNextToSort();
+    wirePagerEvents();
+
+    // First pagination pass
     state.page = 1;
     applyPagination();
 
-    // Watch the container only (lightweight) for list changes
+    // Hide loader when cards exist (or after a hard timeout)
+    const start = Date.now();
+    const timer = setInterval(() => {
+      if (findCards().length || Date.now() - start > 8000) {
+        hideLoader();
+        clearInterval(timer);
+      }
+    }, 200);
+
+    // If the list re-renders later, watch ONLY the list container (low overhead)
+    const container = getContainer();
     const mo = new MutationObserver(() => {
-      // Re-apply pagination if card count changes (debounced)
-      clearTimeout(initOnce._t);
-      initOnce._t = setTimeout(() => {
+      // Re-apply pagination if count changes (debounced)
+      clearTimeout(init._t);
+      init._t = setTimeout(() => {
         const before = state.total;
         const after  = findCards().length;
         if (after !== before) {
           state.page = Math.min(state.page, Math.max(1, Math.ceil(after / state.pageSize)));
           applyPagination();
         }
+        // Ensure toolbar is still beside sort (if DOM moved)
+        moveToolbarNextToSort();
       }, 120);
     });
     mo.observe(container, { childList: true, subtree: true });
 
-    return true;
-  }
-
-  function boot() {
-    showLoader();
-    const started = Date.now();
-    const MAX = 10000; // 10s hard stop
-    const POLL = 200;
-
-    const timer = setInterval(() => {
-      if (initOnce()) { clearInterval(timer); return; }
-      if (Date.now() - started > MAX) { clearInterval(timer); hideLoader(); /* give up gracefully */ }
-    }, POLL);
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
-  }
-})();
-
-/* ===== APPEND-ONLY: move pager to the right of the commodity sort ===== */
-(function relocatePagerRightOfCommoditySort(){
-  const BAR_ID   = 'loads-pager-toolbar';
-  const SORT_IDS = ['sort-commodity']; // add more selectors if needed
-
-  function getSortEl() {
-    // Try common selectors
-    for (const id of SORT_IDS) {
-      const el = document.getElementById(id);
-      if (el) return el;
-    }
-    // Fallbacks if your sort has a different selector
-    return document.querySelector('.commodity-sort, [data-role="commodity-sort"], select[name="commodity"]');
-  }
-
-  function moveBar() {
-    const bar  = document.getElementById(BAR_ID);
-    const sort = getSortEl();
-    if (!bar || !sort) return false;
-
-    // Use the sort's parent as the shared row
-    const row = sort.parentElement || document.body;
-
-    // Make the row a flex line (non-destructive; uses inline style, doesn’t alter your CSS files)
-    // We keep existing styles (class-based) and just add layout hints.
-    if (!row.__hasFlexPatch) {
-      const prev = row.getAttribute('style') || '';
-      // Only add if not already flex-ish
-      if (!/display\s*:\s*flex/i.test(prev)) {
-        row.style.display = 'flex';
-        row.style.alignItems = 'center';
-        row.style.gap = '10px';
-        row.style.flexWrap = 'wrap'; // safer on smaller screens
-      }
-      row.__hasFlexPatch = true;
-    }
-
-    // Create a holder that pushes itself to the right
-    let holder = document.getElementById('loads-pager-holder');
-    if (!holder) {
-      holder = document.createElement('div');
-      holder.id = 'loads-pager-holder';
-      holder.style.marginLeft = 'auto';
-      holder.style.display = 'flex';
-      holder.style.alignItems = 'center';
-      holder.style.gap = '10px';
-      // Move the existing toolbar inside this right-aligned holder
-      holder.appendChild(bar);
-      // Place holder at the end of the row (to the right)
-      row.appendChild(holder);
-    } else if (!holder.contains(bar)) {
-      holder.appendChild(bar);
-    }
-
-    // Optional: tighten toolbar spacing a bit when in the header row
-    bar.style.display = 'flex';
-    bar.style.alignItems = 'center';
-    bar.style.gap = '10px';
-    bar.style.margin = '0'; // remove the margin we added above the list
-
-    // Tweak inner bits to be compact
-    const pp = bar.querySelector('#loads-pp');
-    const label = bar.querySelector('label');
-    if (pp) { pp.style.padding = '4px 6px'; pp.style.minWidth = '64px'; }
-    if (label) { label.style.marginRight = '6px'; label.style.fontSize = '14px'; }
-
-    return true;
-  }
-
-  // Try now, then a couple of times after render (in case sort/toolbar appears late)
-  function run() {
-    if (moveBar()) return;
-    let tries = 0;
-    const t = setInterval(() => {
-      tries++;
-      if (moveBar() || tries > 20) clearInterval(t); // give it up to ~4s (20 * 200ms)
-    }, 200);
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', run);
-  } else {
-    run();
-  }
-})();
-
-/* ===== APPEND-ONLY: Move pager beside commodity sort (right-aligned) ===== */
-(function movePagerNextToSort() {
-  const PAGER_ID = 'loads-pager-toolbar';
-
-  // Add your actual sort selector(s) here if different:
-  const SORT_SELECTORS = [
-    '#sort-commodity',                  // your known ID
-    '.commodity-sort',                  // possible class
-    '[data-role="commodity-sort"]',     // possible data-role
-    'select[name="commodity"]'          // generic fallback
-  ];
-
-  function getSortEl() {
-    for (const sel of SORT_SELECTORS) {
-      const el = document.querySelector(sel);
-      if (el) return el;
-    }
-    return null;
-  }
-
-  function findRow(sortEl) {
-    // Try to locate the header/filters row that contains the sort dropdown
-    return sortEl.closest('.filters, .toolbar, .header, .controls, .filter-row')
-        || sortEl.parentElement;
-  }
-
-  function relocate() {
-    const bar  = document.getElementById(PAGER_ID);
-    const sort = getSortEl();
-    if (!bar || !sort) return false;
-
-    const row = findRow(sort);
-    if (!row) return false;
-
-    // Make the row a flex line (inline style so we don't edit your CSS files)
-    const prevStyle = row.getAttribute('style') || '';
-    if (!/display\s*:\s*flex/i.test(prevStyle)) {
-      row.style.display = 'flex';
-      row.style.alignItems = row.style.alignItems || 'center';
-      row.style.gap = row.style.gap || '10px';
-      row.style.flexWrap = row.style.flexWrap || 'wrap';
-    }
-
-    // Create a right-aligned holder for the pager (so it sits to the right)
-    let holder = document.getElementById('loads-pager-holder');
-    if (!holder) {
-      holder = document.createElement('div');
-      holder.id = 'loads-pager-holder';
-      holder.style.display = 'flex';
-      holder.style.alignItems = 'center';
-      holder.style.gap = '10px';
-      holder.style.marginLeft = 'auto'; // pushes to the right
-      row.appendChild(holder);
-    }
-
-    // Move the toolbar into the holder (right side)
-    if (!holder.contains(bar)) holder.appendChild(bar);
-
-    // Compact the bar a bit in header context
-    bar.style.margin = '0';            // undo any margin when it was above the list
-    bar.style.display = 'flex';
-    bar.style.alignItems = 'center';
-    bar.style.gap = '10px';
-
-    // Tweak inner elements for compact look
-    const label = bar.querySelector('label');
-    const ppSel = bar.querySelector('#loads-pp');
-    if (label) label.style.marginRight = '6px';
-    if (ppSel) { ppSel.style.minWidth = '64px'; ppSel.style.padding = '4px 6px'; }
-
-    return true;
-  }
-
-  function run() {
-    if (relocate()) return;
-    // Retry a few times in case the sort or pager appears slightly later
-    let tries = 0;
-    const t = setInterval(() => {
-      tries++;
-      if (relocate() || tries > 30) clearInterval(t); // ~6s total at 200ms intervals
-    }, 200);
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', run);
-  } else {
-    run();
+  } catch (err) {
+    hideLoader();
+    console.error('Failed to load/render loads:', err);
+    const container = getContainer();
+    const div = document.createElement('div');
+    div.className = 'error';
+    div.textContent = 'Error loading loads.';
+    container.appendChild(div);
   }
 })();
