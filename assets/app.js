@@ -586,3 +586,83 @@ document.addEventListener('DOMContentLoaded', () => {
   style.textContent = css;
   document.head.appendChild(style);
 })();
+
+/* ===== APPEND-ONLY: Force dark mode on top menu/header (auto-detect & restore) ===== */
+(function(){
+  function uniq(arr){ return Array.from(new Set(arr)); }
+
+  function findNavBars(){
+    // Try common header/nav wrappers first
+    const sels = [
+      'header','nav','#header','#topbar','#navbar',
+      '.navbar','.menu-bar','.topbar','.site-header','.main-header',
+      '[role="navigation"]'
+    ];
+    let nodes = [];
+    sels.forEach(s => nodes = nodes.concat(Array.from(document.querySelectorAll(s))));
+
+    // Heuristic: anything near the top that contains "American AI Marketplace"
+    const textHits = Array.from(document.querySelectorAll('body *')).filter(el => {
+      try{
+        const t = (el.textContent || '').trim();
+        return /american ai marketplace/i.test(t) && el.offsetHeight > 0 && el.getBoundingClientRect().top < 200;
+      }catch(e){ return false; }
+    });
+
+    return uniq(nodes.concat(textHits));
+  }
+
+  function applyNavDark(on){
+    const bars = findNavBars();
+    bars.forEach(el => {
+      if (on) {
+        // Save previous inline style once
+        if (!el.dataset.aimDarkPrevStyle) {
+          el.dataset.aimDarkPrevStyle = el.getAttribute('style') || '';
+        }
+        el.style.background   = '#12171d';
+        el.style.color        = '#e6e6e6';
+        el.style.borderBottom = '1px solid #2a3441';
+
+        // Links inside the bar
+        Array.from(el.querySelectorAll('a')).forEach(a => {
+          a.style.color = '#e6e6e6';
+        });
+        // Buttons/inputs inside the bar
+        Array.from(el.querySelectorAll('button, input, select')).forEach(c => {
+          c.style.background = '#1b222b';
+          c.style.color      = '#e6e6e6';
+          c.style.borderColor= '#334052';
+        });
+      } else {
+        // Restore original inline style
+        const prev = el.dataset.aimDarkPrevStyle || '';
+        el.setAttribute('style', prev);
+        // Clear inline overrides on children
+        Array.from(el.querySelectorAll('a,button,input,select')).forEach(c => {
+          c.style.background = '';
+          c.style.color = '';
+          c.style.borderColor = '';
+        });
+      }
+    });
+  }
+
+  // Hook into your existing setDarkMode so the nav flips immediately on toggle
+  if (typeof window.setDarkMode === 'function' && !window.setDarkMode.__navHooked) {
+    const _setDarkMode = window.setDarkMode;
+    window.setDarkMode = function(on){
+      _setDarkMode(on);
+      try { applyNavDark(on); } catch(e){}
+    };
+    window.setDarkMode.__navHooked = true;
+
+    // Apply once on load if Dark Mode is already active
+    if (document.documentElement.classList.contains('dark')) {
+      applyNavDark(true);
+    }
+  } else {
+    // Fallback: apply based on current state
+    applyNavDark(document.documentElement.classList.contains('dark'));
+  }
+})();
