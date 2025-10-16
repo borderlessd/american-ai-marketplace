@@ -394,3 +394,93 @@ document.addEventListener('DOMContentLoaded', () => {
     run();
   }
 })();
+
+/* ===== APPEND-ONLY: Move pager beside commodity sort (right-aligned) ===== */
+(function movePagerNextToSort() {
+  const PAGER_ID = 'loads-pager-toolbar';
+
+  // Add your actual sort selector(s) here if different:
+  const SORT_SELECTORS = [
+    '#sort-commodity',                  // your known ID
+    '.commodity-sort',                  // possible class
+    '[data-role="commodity-sort"]',     // possible data-role
+    'select[name="commodity"]'          // generic fallback
+  ];
+
+  function getSortEl() {
+    for (const sel of SORT_SELECTORS) {
+      const el = document.querySelector(sel);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  function findRow(sortEl) {
+    // Try to locate the header/filters row that contains the sort dropdown
+    return sortEl.closest('.filters, .toolbar, .header, .controls, .filter-row')
+        || sortEl.parentElement;
+  }
+
+  function relocate() {
+    const bar  = document.getElementById(PAGER_ID);
+    const sort = getSortEl();
+    if (!bar || !sort) return false;
+
+    const row = findRow(sort);
+    if (!row) return false;
+
+    // Make the row a flex line (inline style so we don't edit your CSS files)
+    const prevStyle = row.getAttribute('style') || '';
+    if (!/display\s*:\s*flex/i.test(prevStyle)) {
+      row.style.display = 'flex';
+      row.style.alignItems = row.style.alignItems || 'center';
+      row.style.gap = row.style.gap || '10px';
+      row.style.flexWrap = row.style.flexWrap || 'wrap';
+    }
+
+    // Create a right-aligned holder for the pager (so it sits to the right)
+    let holder = document.getElementById('loads-pager-holder');
+    if (!holder) {
+      holder = document.createElement('div');
+      holder.id = 'loads-pager-holder';
+      holder.style.display = 'flex';
+      holder.style.alignItems = 'center';
+      holder.style.gap = '10px';
+      holder.style.marginLeft = 'auto'; // pushes to the right
+      row.appendChild(holder);
+    }
+
+    // Move the toolbar into the holder (right side)
+    if (!holder.contains(bar)) holder.appendChild(bar);
+
+    // Compact the bar a bit in header context
+    bar.style.margin = '0';            // undo any margin when it was above the list
+    bar.style.display = 'flex';
+    bar.style.alignItems = 'center';
+    bar.style.gap = '10px';
+
+    // Tweak inner elements for compact look
+    const label = bar.querySelector('label');
+    const ppSel = bar.querySelector('#loads-pp');
+    if (label) label.style.marginRight = '6px';
+    if (ppSel) { ppSel.style.minWidth = '64px'; ppSel.style.padding = '4px 6px'; }
+
+    return true;
+  }
+
+  function run() {
+    if (relocate()) return;
+    // Retry a few times in case the sort or pager appears slightly later
+    let tries = 0;
+    const t = setInterval(() => {
+      tries++;
+      if (relocate() || tries > 30) clearInterval(t); // ~6s total at 200ms intervals
+    }, 200);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    run();
+  }
+})();
