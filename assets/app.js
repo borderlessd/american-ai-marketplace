@@ -1,9 +1,14 @@
 /* assets/app.js — FULL REPLACE
-   Stable base: your original look + our working pagination (top & bottom)
-   Add-ons integrated safely:
-   - Top load bar during fetch
+   Stable base + Bundle A features:
+   - Cards unchanged (preserve styling)
+   - Loader bar during fetch
    - Dark Mode toggle (persisted)
-   - Auto-refresh (Off/30s/60s/120s) that preserves filters & page
+   - Auto-refresh (Off/30/60/120) preserving filters/page
+   - Pagination top & bottom
+   - NEW: Sort controls (Price/Miles/Date/From/To with ASC/DESC)
+   - NEW: Sticky filters (q/commodity/per page/sort persist)
+   - NEW: Shareable URLs (?q=&commodity=&per=&page=&sort=price:desc)
+   - NEW: Export CSV (current page view)
 */
 
 let LOADS = [];
@@ -17,6 +22,7 @@ function fmtPrice(v){
   try { return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n); }
   catch { return `$${(Math.round(n)||0)}`; }
 }
+function toISO(d){ return d || ''; }
 
 /* ------------------------------
    Dark Mode (persisted)
@@ -37,6 +43,7 @@ function applyDarkModeStyles(){
     :root.dark input, :root.dark select, :root.dark button {
       background:#1b222b; color:#e6e6e6; border-color:#334052;
     }
+    :root.dark #pager-top, :root.dark #pager-bottom { color:#e6e6e6; }
   `.trim();
   const style = document.createElement('style');
   style.id = DARK_STYLE_ID;
@@ -104,24 +111,59 @@ function progressDone(){
 }
 
 /* ------------------------------
-   Pagination state & helpers
+   Pagination + Sorting state
 ------------------------------ */
 const STATE = {
   filtered: [],
   page: 1,
-  pageSize: 25
+  pageSize: 25,
+  sort: { key: 'date', dir: 'desc' } // default
 };
 const PER_PAGE_OPTIONS = [10,25,50,100];
+const SORT_KEYS = [
+  {value:'price',   label:'Price'},
+  {value:'miles',   label:'Miles'},
+  {value:'date',    label:'First Available Date'},
+  {value:'from_city', label:'From'},
+  {value:'to_city',   label:'To'}
+];
+
+function cmp(a,b){
+  if (a==null && b==null) return 0;
+  if (a==null) return -1;
+  if (b==null) return 1;
+  if (typeof a==='number' && typeof b==='number') return a-b;
+  // Try date compare for ISO-like strings
+  const ad = Date.parse(a); const bd = Date.parse(b);
+  if (!isNaN(ad) && !isNaN(bd)) return ad - bd;
+  return String(a).localeCompare(String(b));
+}
+
+function getSorted(list){
+  const {key, dir} = STATE.sort || {};
+  if (!key) return list.slice();
+  const arr = list.slice();
+  arr.sort((x,y) => {
+    const res = cmp(x[key], y[key]);
+    return dir === 'desc' ? -res : res;
+  });
+  return arr;
+}
+
+/* ------------------------------
+   Rendering
+------------------------------ */
+function getGrid(){ return $('#grid'); }
 
 function render(list){
-  const grid = $('#grid'); if(!grid) return;
+  const grid = getGrid(); if(!grid) return;
   // Cards (unchanged structure to preserve styling)
   grid.innerHTML = list.map((l) => `
     <article class="card">
       <div class="route">${l.from_city} → ${l.to_city} <span class="status ${l.status||'open'}">${(l.status||'open').toUpperCase()}</span></div>
       <div class="meta"><strong>Item:</strong> ${l.item ?? ''}</div>
       <div class="meta"><strong>Miles:</strong> ${fmt(l.miles)}</div>
-      <div class="meta"><strong>First Available Date:</strong> ${l.date ?? ''}</div>
+      <div class="meta"><strong>First Available Date:</strong> ${toISO(l.date) ?? ''}</div>
       <div class="price" style="margin:8px 0">Price: ${fmtPrice(l.price)}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn secondary" onclick="openView(${l.__i})">View</button>
@@ -131,8 +173,11 @@ function render(list){
   `).join('');
 }
 
+/* ------------------------------
+   Pager builders (top & bottom)
+------------------------------ */
 function renderPager(where /* 'top'|'bottom' */){
-  const grid = $('#grid'); if(!grid) return;
+  const grid = getGrid(); if(!grid) return;
   const pagerId = where === 'top' ? 'pager-top' : 'pager-bottom';
   let host = document.getElementById(pagerId);
   if (!host) {
@@ -150,11 +195,9 @@ function renderPager(where /* 'top'|'bottom' */){
   const lastPage = Math.max(1, Math.ceil(total / STATE.pageSize));
   if (STATE.page > lastPage) STATE.page = lastPage;
 
-  // Build controls
+  // LEFT: Page size + Sort controls
   const left = document.createElement('div');
-  const right = document.createElement('div');
-
-  // Page size select
+  // per-page
   const sel = document.createElement('select');
   sel.id = `perpage-${where}`;
   sel.style.cssText = 'font:inherit;padding:4px 6px;';
@@ -171,26 +214,34 @@ function renderPager(where /* 'top'|'bottom' */){
   left.appendChild(label);
   left.appendChild(sel);
 
-  // Prev / Page info / Next
-  const prev = document.createElement('button');
-  prev.textContent = 'Prev';
-  prev.style.cssText = 'font:inherit;padding:4px 8px;';
-  prev.disabled = STATE.page <= 1;
+  // sort key
+  const sortWrap = document.createElement('span');
+  sortWrap.style.cssText = 'margin-left:12px;';
+  const sortLabel = document.createElement('label');
+  sortLabel.textContent = 'Sort: ';
+  sortLabel.style.cssText = 'font-size:14px;margin-right:6px;';
+  const sortSel = document.createElement('select');
+  sortSel.id = `sortkey-${where}`;
+  sortSel.style.cssText = 'font:inherit;padding:4px 6px;';
+  SORT_KEYS.forEach(({value,label})=>{
+    const opt = document.createElement('option');
+    opt.value = value; opt.textContent = label;
+    if ((STATE.sort?.key||'')===value) opt.selected = true;
+    sortSel.appendChild(opt);
+  });
+  const dirBtn = document.createElement('button');
+  dirBtn.id = `sortdir-${where}`;
+  dirBtn.style.cssText = 'font:inherit;padding:4px 8px;margin-left:6px;';
+  dirBtn.textContent = (STATE.sort?.dir==='asc') ? 'ASC' : 'DESC';
+  sortWrap.appendChild(sortLabel);
+  sortWrap.appendChild(sortSel);
+  sortWrap.appendChild(dirBtn);
+  left.appendChild(sortWrap);
 
-  const info = document.createElement('span');
-  info.textContent = `Page ${STATE.page} / ${lastPage}`;
-  info.style.cssText = 'margin:0 8px;font-size:14px;';
+  // RIGHT: Dark/Auto + Prev/Info/Next + Export
+  const right = document.createElement('div');
+  right.style.cssText = 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;';
 
-  const next = document.createElement('button');
-  next.textContent = 'Next';
-  next.style.cssText = 'font:inherit;padding:4px 8px;';
-  next.disabled = STATE.page >= lastPage;
-
-  host.innerHTML = '';
-  host.appendChild(left);
-  // Controls strip on the right: Dark Mode + Auto-refresh + Prev/Next
-  const controls = document.createElement('div');
-  controls.style.cssText = 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;';
   // Dark toggle
   const dm = document.createElement('label');
   dm.style.cssText = 'display:inline-flex;align-items:center;gap:6px;font-size:14px;';
@@ -199,7 +250,7 @@ function renderPager(where /* 'top'|'bottom' */){
   dm.appendChild(dmInput);
   dm.appendChild(document.createTextNode('Dark Mode'));
   dmInput.onchange = () => setDarkMode(dmInput.checked);
-  controls.appendChild(dm);
+  right.appendChild(dm);
 
   // Auto-refresh
   const ar = document.createElement('label');
@@ -214,31 +265,60 @@ function renderPager(where /* 'top'|'bottom' */){
     arSel.appendChild(o);
   });
   ar.appendChild(arSel);
-  controls.appendChild(ar);
+  right.appendChild(ar);
 
-  right.appendChild(controls);
+  // Export CSV (current page)
+  const exportBtn = document.createElement('button');
+  exportBtn.textContent = 'Export CSV';
+  exportBtn.style.cssText = 'font:inherit;padding:4px 8px;';
+  right.appendChild(exportBtn);
+
+  // Prev/Next
+  const prev = document.createElement('button');
+  prev.textContent = 'Prev';
+  prev.style.cssText = 'font:inherit;padding:4px 8px;';
+  prev.disabled = STATE.page <= 1;
+
+  const info = document.createElement('span');
+  info.textContent = `Page ${STATE.page} / ${lastPage}`;
+  info.style.cssText = 'margin:0 8px;font-size:14px;';
+
+  const next = document.createElement('button');
+  next.textContent = 'Next';
+  next.style.cssText = 'font:inherit;padding:4px 8px;';
+  next.disabled = STATE.page >= lastPage;
+
   right.appendChild(prev);
   right.appendChild(info);
   right.appendChild(next);
+
+  host.innerHTML = '';
+  host.appendChild(left);
   host.appendChild(right);
 
   // Wire events
-  sel.onchange = () => { STATE.pageSize = parseInt(sel.value, 10) || 25; STATE.page = 1; drawPage(); };
-  prev.onclick = () => { if (STATE.page > 1) { STATE.page--; drawPage(); } };
+  sel.onchange = () => { STATE.pageSize = parseInt(sel.value, 10) || 25; STATE.page = 1; persistUI(); drawPage(); };
+  sortSel.onchange = () => { STATE.sort.key = sortSel.value; STATE.page = 1; persistUI(); drawPage(); };
+  dirBtn.onclick = () => { STATE.sort.dir = (STATE.sort.dir==='asc'?'desc':'asc'); dirBtn.textContent = STATE.sort.dir.toUpperCase(); STATE.page = 1; persistUI(); drawPage(); };
+  prev.onclick = () => { if (STATE.page > 1) { STATE.page--; persistUI(); drawPage(); } };
   next.onclick = () => {
     const last = Math.max(1, Math.ceil(STATE.filtered.length / STATE.pageSize));
-    if (STATE.page < last) { STATE.page++; drawPage(); }
+    if (STATE.page < last) { STATE.page++; persistUI(); drawPage(); }
   };
   arSel.onchange = () => setAutoRefresh(arSel.value);
+  exportBtn.onclick = () => exportCurrentPageCSV();
 }
 
 function drawPage(){
+  // sort then paginate
+  const sorted = getSorted(STATE.filtered);
   const start = (STATE.page - 1) * STATE.pageSize;
   const end   = start + STATE.pageSize;
-  const slice = STATE.filtered.slice(start, end);
+  const slice = sorted.slice(start, end);
   render(slice);
   renderPager('top');
   renderPager('bottom');
+  updateURL();
 }
 
 /* ------------------------------
@@ -257,6 +337,7 @@ function applyFilters(){
 
   STATE.filtered = list;
   STATE.page = 1;
+  persistUI();
   drawPage();
 }
 
@@ -270,7 +351,7 @@ function openView(originalIndex){
     <div class="title">${l.item ?? ''}</div>
     <div class="meta" style="margin-bottom:6px"><strong>Route:</strong> ${l.from_city} → ${l.to_city}</div>
     <div class="meta"><strong>Miles:</strong> ${fmt(l.miles)}</div>
-    <div class="meta"><strong>First Available Date:</strong> ${l.date ?? ''}</div>
+    <div class="meta"><strong>First Available Date:</strong> ${toISO(l.date) ?? ''}</div>
     ${l.price ? `<div class="price" style="margin:8px 0">Price: ${fmtPrice(l.price)}</div>` : ''}
     ${l.commodity ? `<div class="meta"><strong>Commodity:</strong> ${l.commodity}</div>` : ''}
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
@@ -351,6 +432,105 @@ async function loadData(){
 }
 
 /* ------------------------------
+   Sticky UI + URL sync
+------------------------------ */
+function persistUI(){
+  // Save q/commodity if present
+  const qEl = $('#q'); const cEl = $('#commodity');
+  if (qEl) localStorage.setItem('aim_q', qEl.value||'');
+  if (cEl) localStorage.setItem('aim_commodity', cEl.value||'');
+  localStorage.setItem('aim_per', String(STATE.pageSize));
+  localStorage.setItem('aim_sort', `${STATE.sort.key||''}:${STATE.sort.dir||''}`);
+  localStorage.setItem('aim_page', String(STATE.page));
+}
+function restoreUIFromStorage(){
+  const q = localStorage.getItem('aim_q') || '';
+  const c = localStorage.getItem('aim_commodity') || '';
+  const per = parseInt(localStorage.getItem('aim_per')||'0',10);
+  const page = parseInt(localStorage.getItem('aim_page')||'0',10);
+  const sort = (localStorage.getItem('aim_sort')||'').split(':');
+  if ($('#q')) $('#q').value = q;
+  if ($('#commodity')) $('#commodity').value = c;
+  if (per) STATE.pageSize = per;
+  if (page) STATE.page = page;
+  if (sort[0]) STATE.sort.key = sort[0];
+  if (sort[1]) STATE.sort.dir = sort[1];
+}
+function restoreUIFromURL(){
+  const url = new URL(window.location.href);
+  const q = url.searchParams.get('q');
+  const c = url.searchParams.get('commodity');
+  const per = parseInt(url.searchParams.get('per')||'',10);
+  const page = parseInt(url.searchParams.get('page')||'',10);
+  const sort = url.searchParams.get('sort'); // e.g., "price:desc"
+  if (q!=null && $('#q')) $('#q').value = q;
+  if (c!=null && $('#commodity')) $('#commodity').value = c;
+  if (!isNaN(per) && per>0) STATE.pageSize = per;
+  if (!isNaN(page) && page>0) STATE.page = page;
+  if (sort){
+    const [k,d] = sort.split(':');
+    if (k) STATE.sort.key = k;
+    if (d) STATE.sort.dir = d;
+  }
+}
+function updateURL(){
+  const url = new URL(window.location.href);
+  const q = $('#q')?.value || '';
+  const c = $('#commodity')?.value || '';
+  url.searchParams.set('q', q);
+  url.searchParams.set('commodity', c);
+  url.searchParams.set('per', String(STATE.pageSize));
+  url.searchParams.set('page', String(STATE.page));
+  url.searchParams.set('sort', `${STATE.sort.key}:${STATE.sort.dir}`);
+  history.replaceState(null, '', url.toString());
+}
+
+/* ------------------------------
+   CSV export (current page view)
+------------------------------ */
+function exportCurrentPageCSV(){
+  // Build the exact slice currently shown
+  const sorted = getSorted(STATE.filtered);
+  const start = (STATE.page - 1) * STATE.pageSize;
+  const end   = start + STATE.pageSize;
+  const rows  = sorted.slice(start, end);
+
+  // Columns (friendly headers)
+  const headers = ['ID','From','To','First Available Date','Item','Miles','Price','Status','Commodity','Notes'];
+  const csvRows = [headers.join(',')];
+
+  rows.forEach(l => {
+    const r = [
+      l.id || l.load_number || '',
+      l.from_city || '',
+      l.to_city || '',
+      toISO(l.date) || '',
+      l.item || '',
+      Number(l.miles||0),
+      String(l.price||''),
+      (l.status||'').toUpperCase(),
+      l.commodity || '',
+      (l.notes||'').replace(/"/g,'""')
+    ];
+    // CSV escape
+    const line = r.map(v => {
+      const s = String(v==null?'':v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+    }).join(',');
+    csvRows.push(line);
+  });
+
+  const blob = new Blob([csvRows.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `loads_page${STATE.page}_per${STATE.pageSize}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 200);
+}
+
+/* ------------------------------
    Boot
 ------------------------------ */
 document.addEventListener('DOMContentLoaded', () => {
@@ -362,11 +542,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if(adminLink){ adminLink.style.display = (adminFlag === 'true') ? 'inline' : 'none'; }
   }catch(e){}
 
-  // Filters
+  // Restore from URL first (so shared links win), then storage for anything missing
+  restoreUIFromURL();
+  restoreUIFromStorage();
+
+  // Wire filters
   ['q','commodity'].forEach(id => {
     const el = document.getElementById(id);
     if(!el) return;
-    el.addEventListener(el.tagName==='SELECT' ? 'change' : 'input', applyFilters);
+    el.addEventListener(el.tagName==='SELECT' ? 'change' : 'input', () => {
+      applyFilters();
+    });
   });
 
   // Init auto-refresh from storage
@@ -375,294 +561,3 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadData();
 });
-
-/* =========================
-   APPEND-ONLY PATCH
-   - Adds centered loading box (overlay) during data fetch
-   - Extends Dark Mode to header/filters/pagers
-   - Replaces setAutoRefresh to also show overlay during refresh
-   ========================= */
-(function(){
-  // ---------- OVERLAY (little box) ----------
-  const OVERLAY_ID = 'aim-loader-overlay';
-  const OVERBOX_ID = 'aim-loader-box';
-  let overlayCount = 0;
-
-  function ensureOverlay(){
-    if (document.getElementById(OVERLAY_ID)) return;
-    const wrap = document.createElement('div');
-    wrap.id = OVERLAY_ID;
-    wrap.style.cssText = `
-      position:fixed; inset:0; background:rgba(0,0,0,.35);
-      display:none; align-items:center; justify-content:center;
-      z-index:99999; font-family:inherit;
-    `;
-    const box = document.createElement('div');
-    box.id = OVERBOX_ID;
-    box.style.cssText = `
-      background:#fff; padding:14px 18px; border-radius:8px;
-      box-shadow:0 4px 20px rgba(0,0,0,.25); min-width:240px; text-align:center;
-      color:#111;
-    `;
-    box.innerHTML = `
-      <div style="font-weight:600; margin-bottom:6px;">Loading loads…</div>
-      <div style="font-size:12px; opacity:.8;">This can take a moment</div>
-    `;
-    wrap.appendChild(box);
-    document.body.appendChild(wrap);
-  }
-  function overlayStart(){
-    ensureOverlay();
-    overlayCount++;
-    const el = document.getElementById(OVERLAY_ID);
-    if (el) el.style.display = 'flex';
-  }
-  function overlayDone(){
-    overlayCount = Math.max(0, overlayCount - 1);
-    if (overlayCount === 0) {
-      const el = document.getElementById(OVERLAY_ID);
-      if (el) el.style.display = 'none';
-    }
-  }
-
-  // Wrap loadData to show overlay box as well as the top bar
-  if (typeof window.loadData === 'function' && !window.loadData.__wrappedOverlayBox) {
-    const _ld = window.loadData;
-    window.loadData = async function(){
-      try { overlayStart(); } catch(e){}
-      try { return await _ld(); }
-      finally { try { overlayDone(); } catch(e){} }
-    };
-    window.loadData.__wrappedOverlayBox = true;
-  }
-
-  // ---------- DARK MODE header/filters/pagers ----------
-  // Extend the dark styles so your header row, filters and pagers flip too
-  (function extendDarkStyles(){
-    const EXTRA_ID = 'aim-dark-extra-style';
-    if (document.getElementById(EXTRA_ID)) return;
-    const css = `
-      :root.dark header, :root.dark .header, :root.dark #header,
-      :root.dark nav, :root.dark .toolbar, :root.dark .filters,
-      :root.dark #pager-top, :root.dark #pager-bottom, :root.dark .pager,
-      :root.dark .loads-filters, :root.dark .controls {
-        background:#12171d; color:#e6e6e6;
-        border-color:#2a3441;
-      }
-      :root.dark #pager-top select, :root.dark #pager-bottom select,
-      :root.dark #pager-top button, :root.dark #pager-bottom button,
-      :root.dark .filters select, :root.dark .filters input {
-        background:#1b222b; color:#e6e6e6; border-color:#334052;
-      }
-      :root.dark #${OVERBOX_ID} {
-        background:#171c22; color:#e6e6e6; box-shadow:0 4px 20px rgba(0,0,0,.45);
-      }
-    `.trim();
-    const style = document.createElement('style');
-    style.id = EXTRA_ID;
-    style.textContent = css;
-    document.head.appendChild(style);
-
-    // If dark mode is already on, ensure styles applied
-    if (document.documentElement.classList.contains('dark')) {
-      // no-op; styles take effect automatically
-    }
-  })();
-
-  // ---------- Auto-refresh with overlay ----------
-  // Replace setAutoRefresh so refresh fetches also show the little box.
-  // Uses the same logic as your existing setAutoRefresh, plus overlayStart/Done.
-  if (typeof window.setAutoRefresh === 'function') {
-    // keep reference to any existing interval var in outer scope
-    let _getRefreshTimerRef = () => {
-      try { return eval('refreshTimer'); } catch(e){ return null; }
-    };
-    window.setAutoRefresh = function(val /* '0'|'30'|'60'|'120' */){
-      localStorage.setItem('aim_auto_refresh', String(val || '0'));
-      // clear previous interval if we can access it
-      try {
-        if (window.refreshTimer) { clearInterval(window.refreshTimer); window.refreshTimer = null; }
-        else {
-          const rt = _getRefreshTimerRef();
-          if (rt) { clearInterval(rt); try{eval('refreshTimer = null');}catch(e){} }
-        }
-      } catch(e){}
-
-      const seconds = parseInt(val, 10) || 0;
-      if (!seconds) return;
-
-      // Create a fresh interval that mirrors your code, with overlay
-      window.refreshTimer = setInterval(async () => {
-        overlayStart();
-        try {
-          // (Copied from your existing auto-refresh logic)
-          const res = await fetch('/assets/loads.json?ts=' + Date.now(), {cache:'no-store', credentials:'omit'});
-          const data = await res.json();
-          const arr  = Array.isArray(data) ? data : (data.loads||[]);
-          window.LOADS = arr.map((l,i)=>({...l, __i:i}));
-
-          const term = ($('#q')?.value||'').toLowerCase();
-          const comm = ($('#commodity')?.value||'').toLowerCase();
-          const filtered = window.LOADS.filter(l => {
-            const hay = (String(l.item||'')+' '+String(l.from_city||'')+' '+String(l.to_city||'')+' '+String(l.commodity||'')).toLowerCase();
-            const okQ = !term || hay.includes(term);
-            const okC = !comm || (String(l.commodity||'').toLowerCase()===comm);
-            return okQ && okC;
-          });
-
-          const oldPage = STATE.page;
-          STATE.filtered = filtered;
-          const last = Math.max(1, Math.ceil(filtered.length / STATE.pageSize));
-          STATE.page = Math.min(oldPage, last);
-          drawPage();
-        } catch(e){
-          console.warn('Auto-refresh failed:', e);
-        } finally {
-          overlayDone();
-        }
-      }, seconds * 1000);
-    };
-  }
-})();
-/* ===== APPEND-ONLY: Dark mode for top menu/nav ===== */
-(function applyDarkForTopMenu(){
-  const ID = 'aim-dark-menu-style';
-  if (document.getElementById(ID)) return;
-  const css = `
-    /* Add your likely menu/header wrappers here */
-    :root.dark header,
-    :root.dark nav,
-    :root.dark #header,
-    :root.dark #topbar,
-    :root.dark #navbar,
-    :root.dark .navbar,
-    :root.dark .menu-bar,
-    :root.dark .topbar,
-    :root.dark .site-header,
-    :root.dark .main-header {
-      background:#12171d !important;
-      color:#e6e6e6 !important;
-      border-color:#2a3441 !important;
-    }
-
-    /* Links and menu items */
-    :root.dark nav a,
-    :root.dark .navbar a,
-    :root.dark .menu-bar a,
-    :root.dark .topbar a,
-    :root.dark .site-header a,
-    :root.dark .main-header a {
-      color:#e6e6e6 !important;
-    }
-    :root.dark nav a:hover,
-    :root.dark .navbar a:hover,
-    :root.dark .menu-bar a:hover,
-    :root.dark .topbar a:hover,
-    :root.dark .site-header a:hover,
-    :root.dark .main-header a:hover {
-      color:#93e5dc !important; /* subtle hover tint */
-    }
-
-    /* Buttons/inputs inside the bar (e.g., Home / Find Loads if they’re buttons) */
-    :root.dark nav button,
-    :root.dark .navbar button,
-    :root.dark .menu-bar button,
-    :root.dark .topbar button,
-    :root.dark .site-header button,
-    :root.dark .main-header button {
-      background:#1b222b !important;
-      color:#e6e6e6 !important;
-      border-color:#334052 !important;
-    }
-
-    /* Optional: separators / borders under the bar */
-    :root.dark .navbar, :root.dark .menu-bar, :root.dark .topbar {
-      box-shadow: none !important;
-      border-bottom: 1px solid #2a3441 !important;
-    }
-  `.trim();
-  const style = document.createElement('style');
-  style.id = ID;
-  style.textContent = css;
-  document.head.appendChild(style);
-})();
-
-/* ===== APPEND-ONLY: Force dark mode on top menu/header (auto-detect & restore) ===== */
-(function(){
-  function uniq(arr){ return Array.from(new Set(arr)); }
-
-  function findNavBars(){
-    // Try common header/nav wrappers first
-    const sels = [
-      'header','nav','#header','#topbar','#navbar',
-      '.navbar','.menu-bar','.topbar','.site-header','.main-header',
-      '[role="navigation"]'
-    ];
-    let nodes = [];
-    sels.forEach(s => nodes = nodes.concat(Array.from(document.querySelectorAll(s))));
-
-    // Heuristic: anything near the top that contains "American AI Marketplace"
-    const textHits = Array.from(document.querySelectorAll('body *')).filter(el => {
-      try{
-        const t = (el.textContent || '').trim();
-        return /american ai marketplace/i.test(t) && el.offsetHeight > 0 && el.getBoundingClientRect().top < 200;
-      }catch(e){ return false; }
-    });
-
-    return uniq(nodes.concat(textHits));
-  }
-
-  function applyNavDark(on){
-    const bars = findNavBars();
-    bars.forEach(el => {
-      if (on) {
-        // Save previous inline style once
-        if (!el.dataset.aimDarkPrevStyle) {
-          el.dataset.aimDarkPrevStyle = el.getAttribute('style') || '';
-        }
-        el.style.background   = '#12171d';
-        el.style.color        = '#e6e6e6';
-        el.style.borderBottom = '1px solid #2a3441';
-
-        // Links inside the bar
-        Array.from(el.querySelectorAll('a')).forEach(a => {
-          a.style.color = '#e6e6e6';
-        });
-        // Buttons/inputs inside the bar
-        Array.from(el.querySelectorAll('button, input, select')).forEach(c => {
-          c.style.background = '#1b222b';
-          c.style.color      = '#e6e6e6';
-          c.style.borderColor= '#334052';
-        });
-      } else {
-        // Restore original inline style
-        const prev = el.dataset.aimDarkPrevStyle || '';
-        el.setAttribute('style', prev);
-        // Clear inline overrides on children
-        Array.from(el.querySelectorAll('a,button,input,select')).forEach(c => {
-          c.style.background = '';
-          c.style.color = '';
-          c.style.borderColor = '';
-        });
-      }
-    });
-  }
-
-  // Hook into your existing setDarkMode so the nav flips immediately on toggle
-  if (typeof window.setDarkMode === 'function' && !window.setDarkMode.__navHooked) {
-    const _setDarkMode = window.setDarkMode;
-    window.setDarkMode = function(on){
-      _setDarkMode(on);
-      try { applyNavDark(on); } catch(e){}
-    };
-    window.setDarkMode.__navHooked = true;
-
-    // Apply once on load if Dark Mode is already active
-    if (document.documentElement.classList.contains('dark')) {
-      applyNavDark(true);
-    }
-  } else {
-    // Fallback: apply based on current state
-    applyNavDark(document.documentElement.classList.contains('dark'));
-  }
-})();
