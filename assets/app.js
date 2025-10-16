@@ -143,47 +143,38 @@ document.addEventListener('DOMContentLoaded', () => {
 })();
 
 /* =========================
-   APPEND-ONLY: Loader + Pagination (non-destructive)
-   - Keeps your existing boxes/markup/styles.
-   - Shows a loading overlay until cards appear.
-   - Adds page-size select (10/25/50/100) + Prev/Next.
-   - Paginates by hiding/showing existing cards (no re-render).
+   LIGHTWEIGHT Loader + Pagination (append-only, safe)
    ========================= */
-
 (function(){
-  // ---------- helpers ----------
-  function $(sel, root=document){ return root.querySelector(sel); }
-  function $all(sel, root=document){ return Array.from(root.querySelectorAll(sel)); }
+  // --- tiny helpers ---
+  const $  = (sel, root=document) => root.querySelector(sel);
+  const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
-  // Detect your card elements without assuming only one class name
-  function findCardNodes() {
-    // prioritize specific class used in your app, then fallbacks
-    let nodes = $all('.load-card');
-    if (nodes.length) return nodes;
-    nodes = $all('.card');
-    if (nodes.length) return nodes;
-    nodes = $all('.listing, .entry, .item');
-    return nodes;
-  }
-
-  // Try to locate your list container (parent that holds the cards)
+  // Try your usual container/classes; fallbacks kept
   function findContainer() {
     return $('#loads-list') || $('.loads-list') || $('#loads') || $('.cards') || document.body;
   }
+  function findCards() {
+    let nodes = $$('.load-card');
+    if (nodes.length) return nodes;
+    nodes = $$('.card');
+    if (nodes.length) return nodes;
+    return $$('.listing, .entry, .item');
+  }
 
-  // ---------- loader overlay ----------
+  // --- overlay ---
   const LOADER_ID = 'loads-loader-overlay';
   function showLoader() {
     if (document.getElementById(LOADER_ID)) return;
     const d = document.createElement('div');
     d.id = LOADER_ID;
-    d.setAttribute('style', `
-      position: fixed; inset: 0; background: rgba(0,0,0,0.35);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 99999; font-family: inherit;
-    `);
+    d.style.cssText = `
+      position:fixed; inset:0; background:rgba(0,0,0,.35);
+      display:flex; align-items:center; justify-content:center;
+      z-index:99999; font-family:inherit;
+    `;
     d.innerHTML = `
-      <div style="background:#fff; padding:14px 18px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,.25); min-width: 240px; text-align:center;">
+      <div style="background:#fff; padding:14px 18px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,.25); min-width:240px; text-align:center;">
         <div style="font-weight:600; margin-bottom:6px;">Loading loads…</div>
         <div style="font-size:12px; opacity:.8;">This can take a moment</div>
       </div>`;
@@ -194,159 +185,121 @@ document.addEventListener('DOMContentLoaded', () => {
     if (d && d.parentNode) d.parentNode.removeChild(d);
   }
 
-  // ---------- pagination UI ----------
-  const PAGING_ID = 'loads-pager-toolbar';
-  let state = {
-    page: 1,
-    pageSize: 25,
-    total: 0
-  };
+  // --- pagination UI ---
+  const BAR_ID = 'loads-pager-toolbar';
+  const state = { page: 1, pageSize: 25, total: 0 };
 
   function buildToolbar(container) {
-    if (document.getElementById(PAGING_ID)) return document.getElementById(PAGING_ID);
+    if (document.getElementById(BAR_ID)) return;
     const wrap = document.createElement('div');
-    wrap.id = PAGING_ID;
-    wrap.setAttribute('style', `
+    wrap.id = BAR_ID;
+    wrap.style.cssText = `
       display:flex; gap:10px; align-items:center; justify-content:space-between;
-      padding:8px 0; margin-bottom:8px; font-family: inherit;
-    `);
-
+      padding:8px 0; margin-bottom:8px; font-family:inherit;
+    `;
     const left = document.createElement('div');
     left.innerHTML = `
-      <label style="font-size: 14px; margin-right:6px;">Show per page:</label>
-      <select id="loads-pp" style="font: inherit; padding:4px 6px;">
+      <label style="font-size:14px; margin-right:6px;">Show per page:</label>
+      <select id="loads-pp" style="font:inherit; padding:4px 6px;">
         <option value="10">10</option>
         <option value="25" selected>25</option>
         <option value="50">50</option>
         <option value="100">100</option>
       </select>
     `;
-
     const right = document.createElement('div');
     right.innerHTML = `
-      <button id="loads-prev" style="font: inherit; padding:4px 8px;">Prev</button>
-      <span id="loads-pageinfo" style="margin: 0 8px; font-size: 14px;">Page 1 / 1</span>
-      <button id="loads-next" style="font: inherit; padding:4px 8px;">Next</button>
+      <button id="loads-prev" style="font:inherit; padding:4px 8px;">Prev</button>
+      <span id="loads-pageinfo" style="margin:0 8px; font-size:14px;">Page 1 / 1</span>
+      <button id="loads-next" style="font:inherit; padding:4px 8px;">Next</button>
     `;
 
     wrap.appendChild(left);
     wrap.appendChild(right);
-
-    // Insert toolbar just before the list container
-    container.parentNode.insertBefore(wrap, container);
-    return wrap;
+    // Insert above the list
+    const parent = container.parentNode || document.body;
+    parent.insertBefore(wrap, container);
   }
 
   function updatePageInfo() {
-    const info = document.getElementById('loads-pageinfo');
+    const info = $('#loads-pageinfo');
     if (!info) return;
-    const lastPage = Math.max(1, Math.ceil(state.total / state.pageSize));
-    const page = Math.min(state.page, lastPage);
-    state.page = page;
-    info.textContent = `Page ${page} / ${lastPage}`;
-    const prev = document.getElementById('loads-prev');
-    const next = document.getElementById('loads-next');
-    if (prev) prev.disabled = (page <= 1);
-    if (next) next.disabled = (page >= lastPage);
+    const last = Math.max(1, Math.ceil(state.total / state.pageSize));
+    if (state.page > last) state.page = last;
+    info.textContent = `Page ${state.page} / ${last}`;
+    const prev = $('#loads-prev'), next = $('#loads-next');
+    if (prev) prev.disabled = state.page <= 1;
+    if (next) next.disabled = state.page >= last;
   }
 
   function applyPagination() {
-    const cards = findCardNodes();
+    const cards = findCards();
     state.total = cards.length;
     const start = (state.page - 1) * state.pageSize;
-    const end = start + state.pageSize;
-
-    // Hide/show cards without touching markup/CSS
-    cards.forEach((el, i) => {
-      el.style.display = (i >= start && i < end) ? '' : 'none';
-    });
-
+    const end   = start + state.pageSize;
+    cards.forEach((el, i) => { el.style.display = (i >= start && i < end) ? '' : 'none'; });
     updatePageInfo();
   }
 
-  function attachEvents() {
-    const pp = document.getElementById('loads-pp');
-    const prev = document.getElementById('loads-prev');
-    const next = document.getElementById('loads-next');
-
+  function wireEvents() {
+    const pp = $('#loads-pp'), prev = $('#loads-prev'), next = $('#loads-next');
     if (pp && !pp.__wired) {
       pp.__wired = true;
-      pp.addEventListener('change', () => {
-        state.pageSize = parseInt(pp.value, 10) || 25;
-        state.page = 1;
-        applyPagination();
-      });
+      pp.addEventListener('change', () => { state.pageSize = parseInt(pp.value,10) || 25; state.page = 1; applyPagination(); });
     }
     if (prev && !prev.__wired) {
       prev.__wired = true;
-      prev.addEventListener('click', () => {
-        if (state.page > 1) {
-          state.page--;
-          applyPagination();
-          // scroll container into view so nav feels responsive
-          findContainer().scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      });
+      prev.addEventListener('click', () => { if (state.page > 1) { state.page--; applyPagination(); findContainer().scrollIntoView({behavior:'smooth', block:'start'}); } });
     }
     if (next && !next.__wired) {
       next.__wired = true;
       next.addEventListener('click', () => {
-        const lastPage = Math.max(1, Math.ceil(state.total / state.pageSize));
-        if (state.page < lastPage) {
-          state.page++;
-          applyPagination();
-          findContainer().scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+        const last = Math.max(1, Math.ceil(state.total / state.pageSize));
+        if (state.page < last) { state.page++; applyPagination(); findContainer().scrollIntoView({behavior:'smooth', block:'start'}); }
       });
     }
   }
 
-  // ---------- initialization ----------
-  function initWhenCardsExist() {
+  // --- initialize when cards exist (no heavy observers) ---
+  function initOnce() {
     const container = findContainer();
-    const cards = findCardNodes();
-    if (!cards.length || !container) return false;
+    const cards = findCards();
+    if (!container || !cards.length) return false;
 
-    hideLoader(); // cards are visible now
-
-    // Build toolbar once
+    hideLoader();
     buildToolbar(container);
-    attachEvents();
-
-    // Initial pagination
+    wireEvents();
     state.page = 1;
     applyPagination();
+
+    // Watch the container only (lightweight) for list changes
+    const mo = new MutationObserver(() => {
+      // Re-apply pagination if card count changes (debounced)
+      clearTimeout(initOnce._t);
+      initOnce._t = setTimeout(() => {
+        const before = state.total;
+        const after  = findCards().length;
+        if (after !== before) {
+          state.page = Math.min(state.page, Math.max(1, Math.ceil(after / state.pageSize)));
+          applyPagination();
+        }
+      }, 120);
+    });
+    mo.observe(container, { childList: true, subtree: true });
 
     return true;
   }
 
   function boot() {
-    showLoader(); // show spinner immediately
+    showLoader();
+    const started = Date.now();
+    const MAX = 10000; // 10s hard stop
+    const POLL = 200;
 
-    // Try immediately
-    if (initWhenCardsExist()) return;
-
-    // Watch for cards being rendered asynchronously
-    const mo = new MutationObserver(() => {
-      if (initWhenCardsExist()) {
-        // Once initialized, we still need to re-apply if the list fully re-renders later:
-        // Keep observing, but throttle.
-        let t;
-        new MutationObserver(() => {
-          clearTimeout(t);
-          t = setTimeout(() => {
-            // Re-apply pagination if card count has changed
-            state.page = Math.min(state.page, Math.max(1, Math.ceil(findCardNodes().length / state.pageSize)));
-            applyPagination();
-          }, 100);
-        }).observe(findContainer(), { childList: true, subtree: true });
-      }
-    });
-
-    mo.observe(document.documentElement, { childList: true, subtree: true });
-
-    // Safety hatch: hide loader after 8s even if no cards (prevents overlay trap)
-    setTimeout(hideLoader, 8000);
+    const timer = setInterval(() => {
+      if (initOnce()) { clearInterval(timer); return; }
+      if (Date.now() - started > MAX) { clearInterval(timer); hideLoader(); /* give up gracefully */ }
+    }, POLL);
   }
 
   if (document.readyState === 'loading') {
