@@ -524,3 +524,65 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 })();
+/* ===== APPEND-ONLY: Dark mode for top menu/nav ===== */
+(function applyDarkForTopMenu(){
+  const ID = 'aim-dark-menu-style';
+  if (document.getElementById(ID)) return;
+  const css = `
+    /* Add your likely menu/header wrappers here */
+    :root.dark header,
+    :root.dark nav,
+    :root.dark #header,
+    :root.dark #topbar,
+    :root.dark #navbar,
+    :root.dark .navbar,
+    :root.dark .menu-bar,
+    :root.dark .topbar,
+    :root.dark .site-header,
+    :root.dark .main-header {
+      background:#12171d !important;
+      color:#e6e6e6 !important;
+      border-color:#2a3441 !important;
+    }
+
+    /* Links and menu items */
+    :root.dark nav a,
+    :root.dark .navbar a,
+    :root.dark .menu-bar a,
+    :root.dark .topbar a,
+    :root.dark .site-header a,
+    :root.dark .main-header a {
+      color:#e6e6e6 !important;
+    }
+    :root.dark nav a:hover,
+    :root.dark .navbar a:hover,
+    :root.dark .menu-bar a:hover,
+    :root.dark .topbar a:hover,
+    :root.dark .site-header a:hover,
+    :root.dark .main-header a:hover {
+      color:#93e5dc !important; /* subtle hover tint */
+    }
+
+    /* Buttons/inputs inside the bar (e.g., Home / Find Loads if they’re buttons) */
+    :root.dark nav button,
+    :root.dark .navbar button,
+    :root.dark .menu-bar button,
+    :root.dark .topbar button,
+    :root.dark .site-header button,
+    :root.dark .main-header button {
+      background:#1b222b !important;
+      color:#e6e6e6 !important;
+      border-color:#334052 !important;
+    }
+
+    /* Optional: separators / borders under the bar */
+    :root.dark .navbar, :root.dark .menu-bar, :root.dark .topbar {
+      box-shadow: none !important;
+      border-bottom: 1px solid #2a3441 !important;
+    }
+  `.trim();
+  const style = document.createElement('style');
+  style.id = ID;
+  style.textContent = css;
+  document.head.appendChild(style);
+})();
