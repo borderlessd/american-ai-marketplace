@@ -308,3 +308,89 @@ document.addEventListener('DOMContentLoaded', () => {
     boot();
   }
 })();
+
+/* ===== APPEND-ONLY: move pager to the right of the commodity sort ===== */
+(function relocatePagerRightOfCommoditySort(){
+  const BAR_ID   = 'loads-pager-toolbar';
+  const SORT_IDS = ['sort-commodity']; // add more selectors if needed
+
+  function getSortEl() {
+    // Try common selectors
+    for (const id of SORT_IDS) {
+      const el = document.getElementById(id);
+      if (el) return el;
+    }
+    // Fallbacks if your sort has a different selector
+    return document.querySelector('.commodity-sort, [data-role="commodity-sort"], select[name="commodity"]');
+  }
+
+  function moveBar() {
+    const bar  = document.getElementById(BAR_ID);
+    const sort = getSortEl();
+    if (!bar || !sort) return false;
+
+    // Use the sort's parent as the shared row
+    const row = sort.parentElement || document.body;
+
+    // Make the row a flex line (non-destructive; uses inline style, doesn’t alter your CSS files)
+    // We keep existing styles (class-based) and just add layout hints.
+    if (!row.__hasFlexPatch) {
+      const prev = row.getAttribute('style') || '';
+      // Only add if not already flex-ish
+      if (!/display\s*:\s*flex/i.test(prev)) {
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.gap = '10px';
+        row.style.flexWrap = 'wrap'; // safer on smaller screens
+      }
+      row.__hasFlexPatch = true;
+    }
+
+    // Create a holder that pushes itself to the right
+    let holder = document.getElementById('loads-pager-holder');
+    if (!holder) {
+      holder = document.createElement('div');
+      holder.id = 'loads-pager-holder';
+      holder.style.marginLeft = 'auto';
+      holder.style.display = 'flex';
+      holder.style.alignItems = 'center';
+      holder.style.gap = '10px';
+      // Move the existing toolbar inside this right-aligned holder
+      holder.appendChild(bar);
+      // Place holder at the end of the row (to the right)
+      row.appendChild(holder);
+    } else if (!holder.contains(bar)) {
+      holder.appendChild(bar);
+    }
+
+    // Optional: tighten toolbar spacing a bit when in the header row
+    bar.style.display = 'flex';
+    bar.style.alignItems = 'center';
+    bar.style.gap = '10px';
+    bar.style.margin = '0'; // remove the margin we added above the list
+
+    // Tweak inner bits to be compact
+    const pp = bar.querySelector('#loads-pp');
+    const label = bar.querySelector('label');
+    if (pp) { pp.style.padding = '4px 6px'; pp.style.minWidth = '64px'; }
+    if (label) { label.style.marginRight = '6px'; label.style.fontSize = '14px'; }
+
+    return true;
+  }
+
+  // Try now, then a couple of times after render (in case sort/toolbar appears late)
+  function run() {
+    if (moveBar()) return;
+    let tries = 0;
+    const t = setInterval(() => {
+      tries++;
+      if (moveBar() || tries > 20) clearInterval(t); // give it up to ~4s (20 * 200ms)
+    }, 200);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    run();
+  }
+})();
