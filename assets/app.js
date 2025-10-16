@@ -1,14 +1,13 @@
-/* assets/app.js — FULL REPLACE
-   Stable base + Bundle A features:
+/* assets/app.js — FULL REPLACE (icons for sort + dark header fix)
    - Cards unchanged (preserve styling)
    - Loader bar during fetch
-   - Dark Mode toggle (persisted)
+   - Dark Mode (persisted) + header/nav force-theming
    - Auto-refresh (Off/30/60/120) preserving filters/page
    - Pagination top & bottom
-   - NEW: Sort controls (Price/Miles/Date/From/To with ASC/DESC)
-   - NEW: Sticky filters (q/commodity/per page/sort persist)
-   - NEW: Shareable URLs (?q=&commodity=&per=&page=&sort=price:desc)
-   - NEW: Export CSV (current page view)
+   - Sort controls (Price/Miles/Date/From/To) with ▲/▼ icons
+   - Sticky filters (q/commodity/per page/sort persist)
+   - Shareable URLs (?q=&commodity=&per=&page=&sort=price:desc)
+   - CSV export (current page)
 */
 
 let LOADS = [];
@@ -25,10 +24,11 @@ function fmtPrice(v){
 function toISO(d){ return d || ''; }
 
 /* ------------------------------
-   Dark Mode (persisted)
+   Dark Mode (persisted) + header/nav force-theming
 ------------------------------ */
 const DARK_KEY = 'aim_dark_mode';
 const DARK_STYLE_ID = 'aim-dark-style';
+
 function applyDarkModeStyles(){
   if (document.getElementById(DARK_STYLE_ID)) return;
   const css = `
@@ -50,6 +50,49 @@ function applyDarkModeStyles(){
   style.textContent = css;
   document.head.appendChild(style);
 }
+
+// Detect & force-theme your top header/nav as well
+function findNavBars(){
+  const sels = [
+    'header','nav','#header','#topbar','#navbar',
+    '.navbar','.menu-bar','.topbar','.site-header','.main-header',
+    '[role="navigation"]'
+  ];
+  let nodes = [];
+  sels.forEach(s => nodes = nodes.concat(Array.from(document.querySelectorAll(s))));
+  // Heuristic: element near top containing the site title
+  const textHits = Array.from(document.querySelectorAll('body *')).filter(el => {
+    try{
+      const t = (el.textContent || '').trim();
+      return /american ai marketplace/i.test(t) && el.offsetHeight > 0 && el.getBoundingClientRect().top < 200;
+    }catch(e){ return false; }
+  });
+  return Array.from(new Set(nodes.concat(textHits)));
+}
+function applyNavDark(on){
+  const bars = findNavBars();
+  bars.forEach(el => {
+    if (on) {
+      if (!el.dataset.aimDarkPrevStyle) {
+        el.dataset.aimDarkPrevStyle = el.getAttribute('style') || '';
+      }
+      el.style.background   = '#12171d';
+      el.style.color        = '#e6e6e6';
+      el.style.borderBottom = '1px solid #2a3441';
+      Array.from(el.querySelectorAll('a')).forEach(a => { a.style.color = '#e6e6e6'; });
+      Array.from(el.querySelectorAll('button, input, select')).forEach(c => {
+        c.style.background = '#1b222b'; c.style.color = '#e6e6e6'; c.style.borderColor = '#334052';
+      });
+    } else {
+      const prev = el.dataset.aimDarkPrevStyle || '';
+      el.setAttribute('style', prev);
+      Array.from(el.querySelectorAll('a,button,input,select')).forEach(c => {
+        c.style.background = ''; c.style.color = ''; c.style.borderColor = '';
+      });
+    }
+  });
+}
+
 function setDarkMode(on){
   const root = document.documentElement;
   if (on) {
@@ -60,6 +103,8 @@ function setDarkMode(on){
     root.classList.remove('dark');
     localStorage.removeItem(DARK_KEY);
   }
+  // Also flip header/nav immediately
+  try { applyNavDark(on); } catch(e){}
 }
 // init dark mode from storage
 setDarkMode(localStorage.getItem(DARK_KEY) === '1');
@@ -133,12 +178,10 @@ function cmp(a,b){
   if (a==null) return -1;
   if (b==null) return 1;
   if (typeof a==='number' && typeof b==='number') return a-b;
-  // Try date compare for ISO-like strings
   const ad = Date.parse(a); const bd = Date.parse(b);
   if (!isNaN(ad) && !isNaN(bd)) return ad - bd;
   return String(a).localeCompare(String(b));
 }
-
 function getSorted(list){
   const {key, dir} = STATE.sort || {};
   if (!key) return list.slice();
@@ -157,7 +200,6 @@ function getGrid(){ return $('#grid'); }
 
 function render(list){
   const grid = getGrid(); if(!grid) return;
-  // Cards (unchanged structure to preserve styling)
   grid.innerHTML = list.map((l) => `
     <article class="card">
       <div class="route">${l.from_city} → ${l.to_city} <span class="status ${l.status||'open'}">${(l.status||'open').toUpperCase()}</span></div>
@@ -197,6 +239,7 @@ function renderPager(where /* 'top'|'bottom' */){
 
   // LEFT: Page size + Sort controls
   const left = document.createElement('div');
+
   // per-page
   const sel = document.createElement('select');
   sel.id = `perpage-${where}`;
@@ -214,7 +257,7 @@ function renderPager(where /* 'top'|'bottom' */){
   left.appendChild(label);
   left.appendChild(sel);
 
-  // sort key
+  // sort key + direction (icons)
   const sortWrap = document.createElement('span');
   sortWrap.style.cssText = 'margin-left:12px;';
   const sortLabel = document.createElement('label');
@@ -231,8 +274,10 @@ function renderPager(where /* 'top'|'bottom' */){
   });
   const dirBtn = document.createElement('button');
   dirBtn.id = `sortdir-${where}`;
-  dirBtn.style.cssText = 'font:inherit;padding:4px 8px;margin-left:6px;';
-  dirBtn.textContent = (STATE.sort?.dir==='asc') ? 'ASC' : 'DESC';
+  dirBtn.style.cssText = 'font:inherit;padding:4px 8px;margin-left:6px;min-width:2.2em;text-align:center;line-height:1;';
+  // INITIAL ICON based on current state:
+  dirBtn.textContent = (STATE.sort?.dir === 'asc') ? '▲' : '▼';
+  dirBtn.setAttribute('aria-label', (STATE.sort?.dir === 'asc') ? 'Ascending (low → high)' : 'Descending (high → low)');
   sortWrap.appendChild(sortLabel);
   sortWrap.appendChild(sortSel);
   sortWrap.appendChild(dirBtn);
@@ -298,8 +343,20 @@ function renderPager(where /* 'top'|'bottom' */){
 
   // Wire events
   sel.onchange = () => { STATE.pageSize = parseInt(sel.value, 10) || 25; STATE.page = 1; persistUI(); drawPage(); };
+
   sortSel.onchange = () => { STATE.sort.key = sortSel.value; STATE.page = 1; persistUI(); drawPage(); };
-  dirBtn.onclick = () => { STATE.sort.dir = (STATE.sort.dir==='asc'?'desc':'asc'); dirBtn.textContent = STATE.sort.dir.toUpperCase(); STATE.page = 1; persistUI(); drawPage(); };
+
+  dirBtn.onclick = () => {
+    STATE.sort.dir = (STATE.sort.dir==='asc'?'desc':'asc');
+    // Update icon immediately:
+    const asc = (STATE.sort.dir === 'asc');
+    dirBtn.textContent = asc ? '▲' : '▼';
+    dirBtn.setAttribute('aria-label', asc ? 'Ascending (low → high)' : 'Descending (high → low)');
+    persistUI();
+    STATE.page = 1;
+    drawPage();
+  };
+
   prev.onclick = () => { if (STATE.page > 1) { STATE.page--; persistUI(); drawPage(); } };
   next.onclick = () => {
     const last = Math.max(1, Math.ceil(STATE.filtered.length / STATE.pageSize));
@@ -310,7 +367,6 @@ function renderPager(where /* 'top'|'bottom' */){
 }
 
 function drawPage(){
-  // sort then paginate
   const sorted = getSorted(STATE.filtered);
   const start = (STATE.page - 1) * STATE.pageSize;
   const end   = start + STATE.pageSize;
@@ -390,7 +446,6 @@ function setAutoRefresh(val /* '0'|'30'|'60'|'120' */){
       const data = await res.json();
       const arr  = Array.isArray(data) ? data : (data.loads||[]);
       LOADS = arr.map((l,i)=>({...l, __i:i}));
-      // Re-apply current filters & keep page if still valid
       const term = ($('#q')?.value||'').toLowerCase();
       const comm = ($('#commodity')?.value||'').toLowerCase();
       const filtered = LOADS.filter(l => {
@@ -428,14 +483,13 @@ async function loadData(){
   } finally {
     progressDone();
   }
-  applyFilters(); // sets STATE.filtered and draws
+  applyFilters();
 }
 
 /* ------------------------------
    Sticky UI + URL sync
 ------------------------------ */
 function persistUI(){
-  // Save q/commodity if present
   const qEl = $('#q'); const cEl = $('#commodity');
   if (qEl) localStorage.setItem('aim_q', qEl.value||'');
   if (cEl) localStorage.setItem('aim_commodity', cEl.value||'');
@@ -462,7 +516,7 @@ function restoreUIFromURL(){
   const c = url.searchParams.get('commodity');
   const per = parseInt(url.searchParams.get('per')||'',10);
   const page = parseInt(url.searchParams.get('page')||'',10);
-  const sort = url.searchParams.get('sort'); // e.g., "price:desc"
+  const sort = url.searchParams.get('sort'); // "price:desc"
   if (q!=null && $('#q')) $('#q').value = q;
   if (c!=null && $('#commodity')) $('#commodity').value = c;
   if (!isNaN(per) && per>0) STATE.pageSize = per;
@@ -489,13 +543,11 @@ function updateURL(){
    CSV export (current page view)
 ------------------------------ */
 function exportCurrentPageCSV(){
-  // Build the exact slice currently shown
   const sorted = getSorted(STATE.filtered);
   const start = (STATE.page - 1) * STATE.pageSize;
   const end   = start + STATE.pageSize;
   const rows  = sorted.slice(start, end);
 
-  // Columns (friendly headers)
   const headers = ['ID','From','To','First Available Date','Item','Miles','Price','Status','Commodity','Notes'];
   const csvRows = [headers.join(',')];
 
@@ -512,7 +564,6 @@ function exportCurrentPageCSV(){
       l.commodity || '',
       (l.notes||'').replace(/"/g,'""')
     ];
-    // CSV escape
     const line = r.map(v => {
       const s = String(v==null?'':v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
@@ -542,7 +593,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(adminLink){ adminLink.style.display = (adminFlag === 'true') ? 'inline' : 'none'; }
   }catch(e){}
 
-  // Restore from URL first (so shared links win), then storage for anything missing
+  // Restore from URL first, then storage
   restoreUIFromURL();
   restoreUIFromStorage();
 
@@ -561,42 +612,3 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadData();
 });
-
-/* ===== APPEND-ONLY: use ▲ / ▼ for sort direction ===== */
-(function iconizeSortDir(){
-  function setIcon(where){
-    const btn = document.getElementById(`sortdir-${where}`);
-    if (!btn || !window.STATE) return;
-    const asc = (STATE.sort?.dir === 'asc');
-    btn.textContent = asc ? '▲' : '▼';
-    btn.setAttribute('aria-label', asc ? 'Ascending (low → high)' : 'Descending (high → low)');
-    btn.title = asc ? 'Ascending (low → high)' : 'Descending (high → low)';
-    // make sure the button width doesn't jump around
-    btn.style.minWidth = '2.2em';
-    btn.style.textAlign = 'center';
-    btn.style.lineHeight = '1';
-  }
-
-  // Patch renderPager so after it builds, we switch the labels to icons
-  if (typeof window.renderPager === 'function' && !window.renderPager.__iconHooked) {
-    const _renderPager = window.renderPager;
-    window.renderPager = function(where){
-      const res = _renderPager(where);
-      // defer to after DOM updates
-      setTimeout(() => setIcon(where), 0);
-      return res;
-    };
-    window.renderPager.__iconHooked = true;
-  }
-
-  // Also run after initial drawPage (and in case pager already exists)
-  function applyNow(){
-    setIcon('top');
-    setIcon('bottom');
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(applyNow, 0));
-  } else {
-    setTimeout(applyNow, 0);
-  }
-})();
