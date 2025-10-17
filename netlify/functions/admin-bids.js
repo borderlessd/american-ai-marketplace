@@ -1,5 +1,5 @@
 // netlify/functions/admin-bids.js
-// Uses built-in fetch (no imports). Adds Prefer: count=exact for debugging.
+// Debug-enhanced: returns count + sample and echoes the REST URL used.
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE;
@@ -17,24 +17,27 @@ export async function handler(event) {
     return { statusCode: 204, headers: cors(), body: '' };
   }
 
+  // Admin bearer check
   const auth = event.headers.authorization || '';
   if (!auth.startsWith('Bearer ') || auth.slice(7) !== ADMIN_BEARER) {
     return { statusCode: 401, headers: cors(), body: JSON.stringify({ error: 'Unauthorized' }) };
   }
 
   const load = (event.queryStringParameters || {}).load || '';
+  const debugFlag = (event.queryStringParameters || {}).debug === '1';
 
+  // Build Supabase REST request
   const base = `${SUPABASE_URL}/rest/v1/bids`;
   const qs = new URLSearchParams({
     select: 'id,auth_user_id,load_number,amount,notes,created_at',
     order: 'created_at.desc'
   });
-  const url = load
+  const restUrl = load
     ? `${base}?${qs.toString()}&load_number=eq.${encodeURIComponent(load)}`
     : `${base}?${qs.toString()}`;
 
   try {
-    const res = await fetch(url, {
+    const res = await fetch(restUrl, {
       headers: {
         apikey: SERVICE_KEY,
         Authorization: `Bearer ${SERVICE_KEY}`,
@@ -44,19 +47,36 @@ export async function handler(event) {
     });
 
     const text = await res.text();
-    let data = [];
-    try { data = text ? JSON.parse(text) : []; } catch(_) {}
+    let rows = [];
+    try { rows = text ? JSON.parse(text) : []; } catch(_) {}
 
-    // count comes in Content-Range: 0-9/123 (the total after the /)
-    const contentRange = res.headers.get('content-range') || '';
-    const total = Number((contentRange.split('/')[1] || '').trim() || 0);
+    // Extract total count from Content-Range (e.g., "0-9/23")
+    const cr = res.headers.get('content-range') || '';
+    const total = Number((cr.split('/')[1] || '0').trim()) || rows.length;
 
     if (!res.ok) {
-      return { statusCode: res.status, headers: cors(), body: JSON.stringify({ error: text || 'Request failed' }) };
+      return { statusCode: res.status, headers: cors(), body: JSON.stringify({
+        error: text || 'Request failed',
+        debug: debugFlag ? { status: res.status, contentRange: cr, restUrl, project: SUPABASE_URL } : undefined
+      })};
     }
 
-    return { statusCode: 200, headers: cors(), body: JSON.stringify({ bids: data, count: total }) };
+    const body = { bids: rows, count: total };
+    if (debugFlag) {
+      body.debug = {
+        status: res.status,
+        contentRange: cr || '(none)',
+        restUrl,
+        project: SUPABASE_URL,
+        sample: rows[0] || null
+      };
+    }
+
+    return { statusCode: 200, headers: cors(), body: JSON.stringify(body) };
   } catch (e) {
-    return { statusCode: 500, headers: cors(), body: JSON.stringify({ error: e.message }) };
+    return { statusCode: 500, headers: cors(), body: JSON.stringify({
+      error: e.message,
+      debug: debugFlag ? { restUrl, project: SUPABASE_URL } : undefined
+    })};
   }
 }
