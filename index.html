@@ -5,12 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>American AI Marketplace</title>
   <link rel="stylesheet" href="/assets/styles.css">
-
-  <!-- Put this BEFORE /assets/app.js -->
-<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-<script src="/assets/app.js"></script>
-
-  <script defer src="/assets/app.js"></script>
 </head>
 <body>
   <div class="nav">
@@ -52,12 +46,12 @@
   <!-- View Modal -->
   <div id="viewModal" class="modal"><div class="panel"><div id="viewContent"></div></div></div>
 
-  <!-- Auth Modal (bidding) -->
+  <!-- Auth Modal (carrier sign-in) -->
   <div id="authModal" class="modal"><div class="panel">
     <div class="title">Sign in</div>
-    <label>Username <input id="username" class="input" placeholder="Enter a username"></label>
+    <label>Email <input id="authEmail" type="email" class="input" placeholder="name@example.com"></label>
     <div style="height:8px"></div>
-    <label>Password <input id="password" type="password" class="input" placeholder="Enter your password"></label>
+    <label>Password <input id="authPass" type="password" class="input" placeholder="Enter your password"></label>
     <div id="authError" class="error"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
       <button class="btn secondary" onclick="document.getElementById('authModal').classList.remove('open')">Cancel</button>
@@ -87,5 +81,9 @@
       })()">Enter</button>
     </div>
   </div></div>
+
+  <!-- Scripts: Supabase client MUST load before your app.js -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="/assets/app.js"></script>
 </body>
 </html>
