@@ -12,6 +12,7 @@
     th, td { padding:8px; border-bottom:1px solid #ddd; text-align:left; }
     td.num { text-align:right; }
     .panel{ border:1px solid #ddd; padding:16px; border-radius:8px; }
+    pre { background:#f7f7f7; padding:10px; border-radius:6px; overflow:auto; }
   </style>
 </head>
 <body>
@@ -40,6 +41,7 @@
   <div class="admin-wrap" id="mainView" style="display:none;">
     <h2>All Bids</h2>
     <div class="row">
+      <input id="admTable" class="input" placeholder="Table (optional, e.g. bids)">
       <input id="admLoad" class="input" placeholder="Filter: Load # (optional)">
       <button class="btn" id="admFetch">Fetch</button>
       <button class="btn secondary" id="admCSV">Export CSV</button>
@@ -52,6 +54,11 @@
       </thead>
       <tbody id="admRows"></tbody>
     </table>
+
+    <details style="margin-top:16px;">
+      <summary>Debug JSON</summary>
+      <pre id="admDebug"></pre>
+    </details>
   </div>
 
   <script src="/assets/admin.js"></script>
