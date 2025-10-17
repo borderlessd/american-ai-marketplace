@@ -1,19 +1,23 @@
 function token() { return sessionStorage.getItem('aim_admin_bearer') || ''; }
 function setToken(t){ if (t) sessionStorage.setItem('aim_admin_bearer', t); else sessionStorage.removeItem('aim_admin_bearer'); }
 
-function apiUrl(load){
-  return '/api/admin-bids' + (load ? ('?load=' + encodeURIComponent(load)) : '');
+function apiUrl(params={}){
+  const q = new URLSearchParams();
+  if (params.load) q.set('load', params.load);
+  if (params.table) q.set('table', params.table);
+  const qs = q.toString();
+  return '/api/admin-bids' + (qs ? ('?' + qs) : '');
 }
 
 function setRows(rows) {
   const tb = document.getElementById('admRows');
   tb.innerHTML = rows.map(r => `
     <tr>
-      <td>${new Date(r.created_at).toLocaleString()}</td>
-      <td>${r.load_number||''}</td>
-      <td>${r.auth_user_id||''}</td>
-      <td class="num">$${Math.round(Number(r.amount||0)).toLocaleString()}</td>
-      <td>${r.notes||''}</td>
+      <td>${r.created_at ? new Date(r.created_at).toLocaleString() : ''}</td>
+      <td>${r.load_number || ''}</td>
+      <td>${r.auth_user_id || ''}</td>
+      <td class="num">${(r.amount!=null && r.amount!=='') ? '$'+Math.round(Number(r.amount||0)).toLocaleString() : ''}</td>
+      <td>${r.notes || ''}</td>
     </tr>
   `).join('');
 }
@@ -30,7 +34,7 @@ async function login(){
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || 'Login failed');
-    setToken(data.token);  // store bearer returned by the login function
+    setToken(data.token);
     showMain();
   }catch(e){ msg.textContent = e.message; }
 }
@@ -38,16 +42,23 @@ async function login(){
 async function fetchBids(){
   const bearer = token();
   const load   = document.getElementById('admLoad').value.trim();
+  const table  = document.getElementById('admTable').value.trim();
   const msg = document.getElementById('admMsg'); msg.textContent = '';
   if (!bearer) { showLogin('Please log in'); return; }
 
   try {
-    const res = await fetch(apiUrl(load), { headers: { Authorization: 'Bearer ' + bearer } });
+    const url = apiUrl({ load, table });
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + bearer } });
     const data = await res.json();
+    // show raw JSON for visibility
+    const dbg = document.getElementById('admDebug');
+    if (dbg) dbg.textContent = JSON.stringify(data, null, 2);
+
     if (!res.ok) throw new Error(data?.error || 'Request failed');
     const rows = data.bids || [];
     setRows(rows);
     window.__adm_last = rows;
+    msg.textContent = rows.length ? '' : 'No rows returned (see Debug JSON above).';
   } catch (e) {
     msg.textContent = e.message;
   }
