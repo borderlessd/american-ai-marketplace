@@ -7,15 +7,15 @@
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
-<div class="nav">
-  <div><a href="/index.html">American AI Marketplace</a></div>
-  <div>
-    <a href="/index.html">Home</a>
-    <a href="/loads.html">Find Loads</a>
-    <a href="/register.html">Register</a>
-    <a id="adminLink" href="#" style="display:none" onclick="document.getElementById('gateModal').classList.add('open');return false;">Admin</a>
+  <div class="nav">
+    <div><a href="/index.html">American AI Marketplace</a></div>
+    <div>
+      <a href="/index.html">Home</a>
+      <a href="/loads.html">Find Loads</a>
+      <a href="/register.html">Register</a>
+      <a id="adminLink" href="#" style="display:none" onclick="document.getElementById('gateModal').classList.add('open');return false;">Admin</a>
+    </div>
   </div>
-</div>
 
   <section class="hero">
     <h1>Move America, intelligently.</h1>
@@ -58,9 +58,12 @@
       <button class="btn secondary" onclick="document.getElementById('authModal').classList.remove('open')">Cancel</button>
       <button class="btn" onclick="signin()">Continue</button>
     </div>
+    <div style="margin-top:10px;font-size:14px;text-align:right;opacity:.9">
+      New here? <a href="/register.html">Register now</a>
+    </div>
   </div></div>
 
-  <!-- Admin Gate Modal -->
+  <!-- Admin Gate Modal (nav -> /admin/) -->
   <div id="gateModal" class="modal"><div class="panel">
     <div class="title">Admin Access</div>
     <label>Username <input id="gateUser" class="input" placeholder="Enter a username"></label>
@@ -72,7 +75,7 @@
       <button class="btn" onclick="(function(){
         const u=document.getElementById('gateUser').value.trim();
         const p=document.getElementById('gatePass').value.trim();
-        const okU='admin', okP='market'; // change these if you like
+        const okU='admin', okP='market';
         if(u===okU && p===okP){
           sessionStorage.setItem('aim_admin_ok','1');
           window.location.href='/admin/';
