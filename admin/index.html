@@ -1,24 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Admin — Bids</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <style>
+    .admin-wrap{ max-width: 1000px; margin: 24px auto; }
+    .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:8px; border-bottom:1px solid #ddd; text-align:left; }
+    td.num { text-align:right; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <div><a href="/index.html">American AI Marketplace</a></div>
+    <div>
+      <a href="/loads.html">Find Loads</a>
+      <a href="/admin/" class="active">Admin</a>
+    </div>
+  </div>
 
-<!doctype html><html lang="en"><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin — American AI</title>
-<link rel="stylesheet" href="../assets/styles.css">
-</head><body>
-<div class="nav"><div><a href="../index.html">American AI Marketplace</a></div>
-<div><strong style="margin-left:8px">Admin</strong></div></div>
-<div class="wrap">
-  <p style="margin:0 0 12px">Sign in with GitHub to edit loads. Changes auto-deploy via Netlify.</p>
-</div>
-<script>
-  window.__REPO__ = "borderlessd/american-ai-marketplace";
-  (function(){
-    if(sessionStorage.getItem('aim_admin_ok')!=='1'){
-      document.write('<div class="wrap" style="color:#b91c1c">Access denied. Go to the home page with <code>?admin=true</code> and pass the admin gate.</div>');
-      throw new Error('No gate flag');
-    }
-  })();
-</script>
-<script src="https://unpkg.com/decap-cms@^3.0.0/dist/decap-cms.js"></script>
-<script src="/admin/admin.js"></script>
-</body></html>
+  <div class="admin-wrap">
+    <h2>All Bids</h2>
+    <div class="row">
+      <input id="admBearer" class="input" placeholder="ADMIN_BEARER">
+      <input id="admLoad" class="input" placeholder="Filter: Load # (optional)">
+      <button class="btn" id="admFetch">Fetch</button>
+      <button class="btn secondary" id="admCSV">Export CSV</button>
+      <div id="admMsg" class="error"></div>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>When</th><th>Load #</th><th>User</th><th class="num">Amount</th><th>Notes</th></tr>
+      </thead>
+      <tbody id="admRows"></tbody>
+    </table>
+  </div>
+
+  <script src="/assets/admin.js"></script>
+</body>
+</html>
