@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>My Bids — American AI Marketplace</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="nav">
+    <div><a href="/index.html">American AI Marketplace</a></div>
+    <div>
+      <a href="/index.html">Home</a>
+      <a href="/loads.html">Find Loads</a>
+      <a href="/my-bids.html" class="active">My Bids</a>
+    </div>
+  </div>
+
+  <div class="wrap" style="max-width:960px;margin:24px auto;">
+    <h2>My Bids</h2>
+    <div id="bidsList" class="grid"></div>
+    <div id="bidsEmpty" style="display:none;opacity:.8;margin-top:12px;">No bids yet.</div>
+  </div>
+
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="/assets/my-bids.js"></script>
+</body>
+</html>
