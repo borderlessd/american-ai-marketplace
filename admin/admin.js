@@ -30,7 +30,7 @@ async function login(){
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || 'Login failed');
-    setToken(data.token);
+    setToken(data.token);  // store bearer returned by the login function
     showMain();
   }catch(e){ msg.textContent = e.message; }
 }
@@ -84,13 +84,9 @@ function showMain(){
 }
 
 document.addEventListener('DOMContentLoaded', ()=>{
-  // wire UI
-  const t = token();
-  if (t) showMain(); else showLogin();
+  if (token()) showMain(); else showLogin();
 
-  const btnLogin = document.getElementById('admLoginBtn');
-  if (btnLogin) btnLogin.addEventListener('click', login);
-
+  document.getElementById('admLoginBtn')?.addEventListener('click', login);
   document.getElementById('admFetch')?.addEventListener('click', fetchBids);
   document.getElementById('admCSV')?.addEventListener('click', exportCSV);
   document.getElementById('admLogout')?.addEventListener('click', ()=>{ setToken(''); showLogin(); });
