@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Register — American AI Marketplace</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="nav">
+    <div><a href="/index.html">American AI Marketplace</a></div>
+    <div>
+      <a href="/index.html">Home</a>
+      <a href="/loads.html">Find Loads</a>
+      <a href="/register.html" class="active">Register</a>
+    </div>
+  </div>
+
+  <div class="wrap" style="max-width:640px;margin:24px auto;">
+    <h2>Create Carrier Account</h2>
+    <form id="regForm">
+      <label>Email
+        <input id="regEmail" type="email" class="input" required placeholder="name@example.com">
+      </label>
+      <div style="height:8px"></div>
+      <label>Password
+        <input id="regPass" type="password" class="input" required placeholder="Minimum 6 characters">
+      </label>
+
+      <div style="height:16px"></div>
+      <fieldset style="border:1px solid #ddd;padding:12px;border-radius:8px;">
+        <legend>Optional profile</legend>
+        <label>Company <input id="regCompany" class="input" placeholder="Company name"></label>
+        <div style="height:8px"></div>
+        <label>Contact name <input id="regName" class="input" placeholder="Your name"></label>
+        <div style="height:8px"></div>
+        <label>Phone <input id="regPhone" class="input" placeholder="(555) 555-5555"></label>
+        <div style="height:8px"></div>
+        <label>MC Number <input id="regMC" class="input" placeholder="MC#######"></label>
+      </fieldset>
+
+      <div id="regError" class="error" style="margin-top:8px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <a class="btn secondary" href="/loads.html">Cancel</a>
+        <button class="btn" type="submit">Register</button>
+      </div>
+    </form>
+  </div>
+
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="/assets/register.js"></script>
+</body>
+</html>
