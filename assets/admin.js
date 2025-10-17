@@ -1,12 +1,8 @@
 function token() { return sessionStorage.getItem('aim_admin_bearer') || ''; }
 function setToken(t){ if (t) sessionStorage.setItem('aim_admin_bearer', t); else sessionStorage.removeItem('aim_admin_bearer'); }
 
-function apiUrl(params={}){
-  const q = new URLSearchParams();
-  if (params.load) q.set('load', params.load);
-  if (params.table) q.set('table', params.table);
-  const qs = q.toString();
-  return '/api/admin-bids' + (qs ? ('?' + qs) : '');
+function apiUrl(load){
+  return '/api/admin-bids' + (load ? ('?load=' + encodeURIComponent(load)) : '');
 }
 
 function setRows(rows) {
@@ -42,23 +38,17 @@ async function login(){
 async function fetchBids(){
   const bearer = token();
   const load   = document.getElementById('admLoad').value.trim();
-  const table  = document.getElementById('admTable').value.trim();
   const msg = document.getElementById('admMsg'); msg.textContent = '';
   if (!bearer) { showLogin('Please log in'); return; }
 
   try {
-    const url = apiUrl({ load, table });
-    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + bearer } });
+    const res = await fetch(apiUrl(load), { headers: { Authorization: 'Bearer ' + bearer } });
     const data = await res.json();
-    // show raw JSON for visibility
-    const dbg = document.getElementById('admDebug');
-    if (dbg) dbg.textContent = JSON.stringify(data, null, 2);
-
     if (!res.ok) throw new Error(data?.error || 'Request failed');
     const rows = data.bids || [];
     setRows(rows);
     window.__adm_last = rows;
-    msg.textContent = rows.length ? '' : 'No rows returned (see Debug JSON above).';
+    msg.textContent = rows.length ? '' : 'No rows found.';
   } catch (e) {
     msg.textContent = e.message;
   }
