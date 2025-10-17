@@ -3,9 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>American AI Marketplace</title>
+  <title>American AI Marketplace — Loads</title>
   <link rel="stylesheet" href="/assets/styles.css">
-  <script defer src="/assets/app.js"></script>
 </head>
 <body>
   <div class="nav">
@@ -45,31 +44,39 @@
   </div>
 
   <!-- View Modal -->
-  <div id="viewModal" class="modal"><div class="panel"><div id="viewContent"></div></div></div>
-
-  <!-- Auth Modal (bidding) -->
-  <div id="authModal" class="modal"><div class="panel">
-    <div class="title">Sign in</div>
-    <label>Username <input id="username" class="input" placeholder="Enter a username"></label>
-    <div style="height:8px"></div>
-    <label>Password <input id="password" type="password" class="input" placeholder="Enter your password"></label>
-    <div id="authError" class="error"></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn secondary" onclick="document.getElementById('authModal').classList.remove('open')">Cancel</button>
-      <button class="btn" onclick="signin()">Continue</button>
+  <div id="viewModal" class="modal">
+    <div class="panel">
+      <div id="viewContent"></div>
     </div>
-  </div></div>
+  </div>
+
+  <!-- Auth Modal (carrier sign-in) -->
+  <div id="authModal" class="modal">
+    <div class="panel">
+      <div class="title">Sign in</div>
+      <form onsubmit="signin(); return false;">
+        <label>Email
+          <input id="authEmail" type="email" class="input" placeholder="name@example.com" autocomplete="email">
+        </label>
+        <div style="height:8px"></div>
+        <label>Password
+          <input id="authPass" type="password" class="input" placeholder="Enter your password" autocomplete="current-password">
+        </label>
+        <div id="authError" class="error"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+          <button type="button" class="btn secondary" onclick="document.getElementById('authModal').classList.remove('open')">Cancel</button>
+          <button type="submit" class="btn">Continue</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- Admin Gate Modal -->
-  <div id="gateModal" class="modal"><div class="panel">
-    <div class="title">Find Loads — American AI</div>
-    <label>Username <input id="gateUser" class="input" placeholder="Enter a username"></label>
-    <div style="height:8px"></div>
-    <label>Password <input id="gatePass" type="password" class="input" placeholder="Enter your password"></label>
-    <div id="gateError" class="error"></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn secondary" onclick="document.getElementById('gateModal').classList.remove('open')">Cancel</button>
-      <button class="btn" onclick="(function(){
+  <div id="gateModal" class="modal">
+    <div class="panel">
+      <div class="title">Admin Access</div>
+      <form onsubmit="(function(e){
+        e.preventDefault();
         const u=document.getElementById('gateUser').value.trim();
         const p=document.getElementById('gatePass').value.trim();
         const okU='admin', okP='market'; // change these if you like
@@ -79,8 +86,25 @@
         }else{
           document.getElementById('gateError').textContent='Invalid username or password.';
         }
-      })()">Enter</button>
+      })(event);">
+        <label>Username
+          <input id="gateUser" class="input" placeholder="Enter a username" autocomplete="username">
+        </label>
+        <div style="height:8px"></div>
+        <label>Password
+          <input id="gatePass" type="password" class="input" placeholder="Enter your password" autocomplete="current-password">
+        </label>
+        <div id="gateError" class="error"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+          <button type="button" class="btn secondary" onclick="document.getElementById('gateModal').classList.remove('open')">Cancel</button>
+          <button type="submit" class="btn">Enter</button>
+        </div>
+      </form>
     </div>
-  </div></div>
+  </div>
+
+  <!-- Scripts: Supabase MUST load before your app.js -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="/assets/app.js"></script>
 </body>
 </html>
