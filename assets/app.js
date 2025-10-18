@@ -1,4 +1,4 @@
-/* =========================================================================
+./* =========================================================================
    /assets/app.js — cleaned, consolidated, non-destructive
    ========================================================================= */
 
@@ -434,3 +434,177 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(unblockOverlays, 200);
   setTimeout(unblockOverlays, 800);
 });
+
+/* ===============================
+   BID SNAPSHOT FAIL-SAFE (append-only)
+   - On Bid click: capture a full snapshot of that card’s data
+   - On Submit: prefer snapshot; fall back to key/list if needed
+   =============================== */
+(function bidSnapshotFailsafe(){
+  // Tiny helpers
+  const pick = (...xs)=>{ for (const x of xs){ if (x!=null && x!=='') return x; } return ''; };
+  const fromCity = l => pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from);
+  const toCity   = l => pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to);
+  const dateStr  = l => { const r = pick(l.date,l.available,l.availableDate,l.pickup_date,l.pickupDate,l.readyDate,l.date_available); return r?String(r):''; };
+  const itemName = l => pick(l.item,l.vehicle,l.commodity,'Item');
+  const safeMilesNum = (m)=>{
+    const n = (typeof m==='string') ? Number(m.replace(/,/g,'')) : Number(m);
+    return Number.isFinite(n) ? n : null;
+  };
+  const makeKey  = l => {
+    const k = l?.load_number || l?.id || l?.uuid || l?.key;
+    if (k) return String(k);
+    return `${fromCity(l)||'FROM'}-${toCity(l)||'TO'}-${dateStr(l)||''}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
+  };
+  function getLoadIdentifiers(l){
+    const ln = l?.load_number || l?.loadNo || l?.loadNum;
+    const id = l?.id || l?.uuid || l?.key;
+    let ident = ln || id || makeKey(l);
+    return { load_number: String(ident||''), load_id: String(id || ident || '') };
+  }
+
+  // Parse a card’s DOM if needed (route/item/miles/date). Last resort.
+  function snapshotFromCardEl(card){
+    if (!card) return null;
+    const routeTxt = (card.querySelector('.route')?.textContent||'').trim();
+    // Expect "From → To"
+    let route_from = '', route_to = '';
+    if (routeTxt.includes('→')){
+      const [f,t] = routeTxt.split('→');
+      route_from = (f||'').trim();
+      route_to   = (t||'').replace(/\s+OPEN|CLOSED|ACTIVE|PENDING.*/i,'').trim();
+    }
+    const metas = Array.from(card.querySelectorAll('.meta')).map(x=>x.textContent.trim());
+    const itemLine  = metas.find(t=>/^item:/i.test(t)) || '';
+    const milesLine = metas.find(t=>/^miles:/i.test(t)) || '';
+    const dateLine  = metas.find(t=>/^first available date:/i.test(t)) || '';
+
+    const item  = itemLine.replace(/^item:\s*/i,'').trim();
+    const miles = safeMilesNum((milesLine.match(/miles:\s*([\d,]+)/i)||[])[1]||'');
+    const date  = (dateLine.match(/first available date:\s*(.+)$/i)||[])[1]?.trim()||'';
+
+    const snap = {
+      route_from, route_to, item, miles,
+      available: date, availableDate: date, pickup_date: date, date, // many aliases
+    };
+    // try to carry key from dataset if present
+    const k = card.dataset?.aimId;
+    if (k) snap.__key = String(k);
+    return snap;
+  }
+
+  // Build a clean snapshot from a load object
+  function snapshotFromLoad(l){
+    if (!l) return null;
+    const ids = getLoadIdentifiers(l);
+    return {
+      __key: makeKey(l),
+      load_number: ids.load_number,
+      load_id: ids.load_id,
+      route_from: fromCity(l),
+      route_to: toCity(l),
+      item: itemName(l),
+      miles: safeMilesNum(l.miles),
+      available: dateStr(l)
+    };
+  }
+
+  // Store the snapshot when user clicks any Bid button
+  document.addEventListener('click', (e)=>{
+    const el = e.target.closest('button, a');
+    if (!el) return;
+    const looksBid = /(^|\s)btn(\s|$)/.test(el.className||'') && /bid/i.test(el.textContent||'');
+    if (!looksBid) return;
+
+    const card = el.closest('.card, .load-card');
+    if (!card) return;
+
+    // Preferred: find matching object in the last list by data-aim-id
+    const key = card.dataset?.aimId || null;
+    let snap = null;
+
+    if (key && Array.isArray(window.__lastList) && window.__lastList.length){
+      const obj = window.__lastList.find(x => makeKey(x) === key);
+      snap = snapshotFromLoad(obj);
+    }
+
+    // Fallback: parse from card DOM if we didn’t find an object
+    if (!snap) snap = snapshotFromCardEl(card);
+
+    // Keep for submit
+    window.__aimBidSnapshot = snap || null;
+  }, true);
+
+  // Wrap/replace submitBid to prefer the snapshot
+  const origSubmit = (typeof window.submitBid === 'function') ? window.submitBid : null;
+  window.submitBid = async function(){
+    const err = document.getElementById('bidError');
+    const amtEl = document.getElementById('bidAmount');
+    const notesEl = document.getElementById('bidNotes');
+
+    // Validate amount
+    const raw = (amtEl?.value || '').trim();
+    const amount = Number(raw);
+    if (!raw || !Number.isFinite(amount) || amount <= 0){
+      if (err) err.textContent = 'Please enter a valid dollar amount.';
+      return;
+    }
+
+    // Resolve auth (cached first)
+    let uid = (window.__aimAuth && window.__aimAuth.uid) || null;
+    if (!uid && window.sb?.auth){
+      try { const { data } = await sb.auth.getUser(); uid = data?.user?.id || null; } catch(_){}
+    }
+    if (!uid){ (typeof window.openAuth==='function'? window.openAuth() : document.getElementById('authModal')?.classList.add('open')); return; }
+
+    // Prefer snapshot
+    let snap = window.__aimBidSnapshot || null;
+
+    // Fallback to key → list lookup
+    if (!snap) {
+      const key = window.__currentBidKey || null;
+      const list = Array.isArray(window.__lastList) ? window.__lastList : [];
+      const obj = key ? list.find(x => makeKey(x) === key) : null;
+      if (obj) snap = snapshotFromLoad(obj);
+    }
+
+    // If still nothing, last-ditch: try open view’s card (DOM)
+    if (!snap) {
+      const openCard = document.querySelector('#grid .card, #grid .load-card'); // first visible card
+      snap = snapshotFromCardEl(openCard);
+    }
+
+    if (!snap){
+      if (err) err.textContent = 'Load not found.';
+      return;
+    }
+
+    // Build payload from snapshot (no reliance on list now)
+    const ids = getLoadIdentifiers({ load_number: snap.load_number, id: snap.load_id, ...snap });
+    const payload = {
+      load_number: ids.load_number,
+      load_id: ids.load_id,
+      route_from: snap.route_from || '',
+      route_to: snap.route_to || '',
+      item: snap.item || 'Item',
+      miles: (typeof snap.miles==='number' ? snap.miles : null),
+      price_offer: Math.round(amount),
+      notes: (notesEl?.value || '').trim() || null,
+      auth_user_id: uid,
+      status: 'SUBMITTED',
+      created_at: new Date().toISOString()
+    };
+
+    try{
+      const { error } = await (window.sb ? sb.from('bids').insert(payload) : Promise.reject(new Error('No DB client')));
+      if (error) throw error;
+      (typeof window.closeBidModal==='function' ? window.closeBidModal() : document.getElementById('bidModal')?.classList.remove('open'));
+      alert('Bid submitted! You can review it in Admin.');
+      // clear snapshot after success
+      window.__aimBidSnapshot = null;
+    }catch(e){
+      console.error('Bid insert failed:', e);
+      if (err) err.textContent = e.message || 'Failed to submit bid.';
+    }
+  };
+})();
