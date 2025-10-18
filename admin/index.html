@@ -1,12 +1,65 @@
-<table>
-  <thead>
-    <tr>
-      <th>When</th>
-      <th>Load #</th>
-      <th>Company</th>
-      <th class="num">Amount</th>
-      <th>Notes</th>
-    </tr>
-  </thead>
-  <tbody id="admRows"></tbody>
-</table>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Admin — Bids</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <style>
+    .admin-wrap{ max-width: 1000px; margin: 24px auto; }
+    .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:8px; border-bottom:1px solid #ddd; text-align:left; }
+    td.num { text-align:right; }
+    .panel{ border:1px solid #ddd; padding:16px; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <div><a href="/index.html">American AI Marketplace</a></div>
+    <div>
+      <a href="/loads.html">Find Loads</a>
+      <a href="/admin/" class="active">Admin</a>
+    </div>
+  </div>
+
+  <!-- Login view -->
+  <div class="admin-wrap" id="loginView" style="display:none;">
+    <h2>Admin Login</h2>
+    <div class="panel">
+      <div class="row">
+        <input id="admUser" class="input" placeholder="Username">
+        <input id="admPass" class="input" type="password" placeholder="Password">
+        <button class="btn" id="admLoginBtn">Login</button>
+      </div>
+      <div id="loginMsg" class="error"></div>
+    </div>
+  </div>
+
+  <!-- Main view -->
+  <div class="admin-wrap" id="mainView" style="display:none;">
+    <h2>All Bids</h2>
+    <div class="row">
+      <input id="admLoad" class="input" placeholder="Filter: Load # (optional)">
+      <button class="btn" id="admFetch">Fetch</button>
+      <button class="btn secondary" id="admCSV">Export CSV</button>
+      <button class="btn secondary" id="admLogout" style="margin-left:auto;">Logout</button>
+      <div id="admMsg" class="error"></div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Load #</th>
+          <th>Company</th>
+          <th class="num">Amount</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody id="admRows"></tbody>
+    </table>
+  </div>
+
+  <script src="/assets/admin.js"></script>
+</body>
+</html>
