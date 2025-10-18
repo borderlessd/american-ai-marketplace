@@ -452,3 +452,54 @@ window.submitBid = async function(){
     }
   };
 })();
+
+/* ===== APPEND-ONLY PATCH: keep the last rendered list and use it for bids ===== */
+
+// 1) Remember the most recent list used by render(list)
+(function attachRenderTap(){
+  if (typeof window.render === 'function' && !window.render.__aim_tapped) {
+    const __origRender = window.render;
+    window.render = function(list){
+      try { window.__aimLastList = Array.isArray(list) ? list : []; } catch(_) {}
+      return __origRender.apply(this, arguments);
+    };
+    window.render.__aim_tapped = true;
+  }
+})();
+
+// 2) Helper to safely get the load by "filtered index"
+function __getLoadForBid(index){
+  const list = Array.isArray(window.__aimLastList) ? window.__aimLastList : null;
+  if (list && list[index]) return list[index];
+  // fallback to full LOADS if nothing else
+  if (Array.isArray(window.LOADS) && window.LOADS[index]) return window.LOADS[index];
+  return null;
+}
+
+// 3) Patch bid() to store index and open modal (auth-checked)
+window.bid = async function(index){
+  try{
+    window.__currentBidIndex = Number(index);
+    if (!window.sb?.auth) { openAuth(); return; }
+    const { data } = await sb.auth.getUser();
+    if (!data?.user?.id) { openAuth(); return; }
+    openBidModal();
+  }catch(e){
+    console.warn('bid() error', e);
+    openAuth();
+  }
+};
+
+// 4) Patch submitBid() to fetch the load from the *last rendered list*
+if (typeof window.submitBid === 'function' && !window.submitBid.__aim_patched) {
+  const __origSubmit = window.submitBid;
+  window.submitBid = async function(){
+    const err = document.getElementById('bidError');
+    const idx = (typeof window.__currentBidIndex === 'number') ? window.__currentBidIndex : null;
+    const l = __getLoadForBid(idx);
+    if (!l) { if (err) err.textContent = 'Load not found.'; return; }
+    // continue with the existing submit logic
+    return __origSubmit.apply(this, arguments);
+  };
+  window.submitBid.__aim_patched = true;
+}
