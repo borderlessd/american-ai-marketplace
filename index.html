@@ -17,7 +17,7 @@
       <a id="myBidsLink" href="#" style="display:none;">My Bids (<span id="bidCount">0</span>)</a>
       <a id="signinLink" href="#" onclick="openAuth();return false;">Sign In</a>
       <a id="signoutLink" href="#" style="display:none;" onclick="signout();return false;">Sign Out</a>
-      <!-- Admin access only via ?admin=true -->
+      <!-- Admin link only revealed when ?admin=true (handled in app.js) -->
       <a id="adminLink" href="#" style="display:none"
          onclick="document.getElementById('gateModal').classList.add('open');return false;">Admin</a>
     </div>
@@ -38,6 +38,7 @@
 
   <!-- CONTENT -->
   <div class="wrap">
+    <!-- Controls row (+ right-aligned pager holder that app.js moves toolbar into) -->
     <div class="controls" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
       <input id="q" class="input" placeholder="Search city, commodity, item…">
       <select id="commodity" class="input">
@@ -45,12 +46,14 @@
         <option>Vehicle</option><option>Boat</option><option>Motorcycle</option>
         <option>Household</option><option>LTL</option><option>Pets</option><option>Heavy Equipment</option>
       </select>
+      <!-- IMPORTANT: this holder must exist so pagination can sit to the right -->
       <div id="loads-pager-holder" style="margin-left:auto;display:flex;align-items:center;gap:10px;"></div>
     </div>
 
+    <!-- Cards grid (populated by /assets/app.js) -->
     <div id="grid" class="grid"></div>
 
-    <!-- Bottom pagination -->
+    <!-- Bottom pagination (wired by /assets/app.js) -->
     <div id="pagerBottom" style="text-align:center;margin:20px 0;">
       <button id="prevPage" class="btn secondary">Prev</button>
       <span id="pageInfo">Page 1 / 1</span>
@@ -66,7 +69,7 @@
   <!-- VIEW MODAL -->
   <div id="viewModal" class="modal"><div class="panel"><div id="viewContent"></div></div></div>
 
-  <!-- AUTH MODAL -->
+  <!-- AUTH MODAL (carriers) -->
   <div id="authModal" class="modal"><div class="panel">
     <div class="title">Sign in</div>
     <label>Email <input id="authEmail" type="email" class="input" placeholder="name@example.com"></label>
@@ -82,7 +85,7 @@
     </div>
   </div></div>
 
-  <!-- ADMIN GATE -->
+  <!-- ADMIN GATE MODAL -->
   <div id="gateModal" class="modal"><div class="panel">
     <div class="title">Admin Access</div>
     <label>Username <input id="gateUser" class="input" placeholder="Enter a username"></label>
@@ -105,63 +108,67 @@
     </div>
   </div></div>
 
-  <!-- SCRIPTS -->
+  <!-- Scripts: Supabase must load before your app -->
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script src="/assets/app.js"></script>
 
-  <!-- DARK MODE -->
+  <!-- Dark mode + navbar auth/bids wiring (runs after app.js is available) -->
   <script>
-    (function(){
-      const btn=document.getElementById('darkToggle');
-      function apply(){
-        const dark=localStorage.getItem('aim_dark')==='1';
-        document.body.classList.toggle('dark',dark);
-        if(btn)btn.textContent=dark?'☀️ Light':'🌙 Dark';
-      }
-      if(btn){
-        btn.addEventListener('click',()=>{
-          const next=document.body.classList.toggle('dark');
-          localStorage.setItem('aim_dark',next?'1':'0');
-          btn.textContent=next?'☀️ Light':'🌙 Dark';
+    document.addEventListener('DOMContentLoaded', () => {
+      // Dark mode
+      const btn = document.getElementById('darkToggle');
+      const applyDark = () => {
+        const dark = localStorage.getItem('aim_dark') === '1';
+        document.body.classList.toggle('dark', dark);
+        if (btn) btn.textContent = dark ? '☀️ Light' : '🌙 Dark';
+      };
+      if (btn) {
+        btn.addEventListener('click', () => {
+          const next = document.body.classList.toggle('dark');
+          localStorage.setItem('aim_dark', next ? '1' : '0');
+          btn.textContent = next ? '☀️ Light' : '🌙 Dark';
         });
       }
-      apply();
-    })();
-  </script>
+      applyDark();
 
-  <!-- USER + BIDS STATUS -->
-  <script>
-    document.addEventListener('DOMContentLoaded',()=>{
-      const supabaseUrl="https://xntxctjjtfjeznircuas.supabase.co";
-      const supabaseKey="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
-      const client=supabase.createClient(supabaseUrl,supabaseKey);
-      const signinLink=document.getElementById('signinLink');
-      const signoutLink=document.getElementById('signoutLink');
-      const myBidsLink=document.getElementById('myBidsLink');
-      const bidCount=document.getElementById('bidCount');
+      // Nav: sign in/out + My Bids (count)
+      const signinLink = document.getElementById('signinLink');
+      const signoutLink = document.getElementById('signoutLink');
+      const myBidsLink  = document.getElementById('myBidsLink');
+      const bidCountEl  = document.getElementById('bidCount');
 
-      client.auth.getUser().then(async({data})=>{
-        if(data.user){
-          signinLink.style.display='none';
-          signoutLink.style.display='inline';
-          myBidsLink.style.display='inline';
-          // Count this user's bids
-          const {data:bids}=await client.from('bids')
-            .select('id',{count:'exact'})
-            .eq('user_id',data.user.id);
-          if(bids && bidCount) bidCount.textContent=bids.length||0;
-        }else{
-          signinLink.style.display='inline';
-          signoutLink.style.display='none';
-          myBidsLink.style.display='none';
+      (async () => {
+        try {
+          const { data } = await sb.auth.getUser();
+          if (data?.user?.id) {
+            if (signinLink) signinLink.style.display = 'none';
+            if (signoutLink) signoutLink.style.display = 'inline';
+            if (myBidsLink)  myBidsLink.style.display  = 'inline';
+
+            // Count this user's bids
+            const { data: rows } = await sb
+              .from('bids')
+              .select('id', { count: 'exact', head: false })
+              .eq('auth_user_id', data.user.id);
+            if (Array.isArray(rows) && bidCountEl) bidCountEl.textContent = rows.length || 0;
+
+            // Optional: click for a simple “my bids” filter (could route to a page later)
+            myBidsLink && (myBidsLink.onclick = (e) => {
+              e.preventDefault();
+              alert('My Bids view coming next. For now, use Admin to see all bids.');
+            });
+          } else {
+            if (signinLink) signinLink.style.display = 'inline';
+            if (signoutLink) signoutLink.style.display = 'none';
+            if (myBidsLink)  myBidsLink.style.display  = 'none';
+          }
+        } catch(e) {
+          // non-fatal
         }
-      });
+      })();
 
-      window.signout=async()=>{
-        await client.auth.signOut();
-        localStorage.removeItem('aim_token');
-        location.reload();
-      };
+      // Expose closeAuth used in the Cancel button
+      window.closeAuth = () => document.getElementById('authModal')?.classList.remove('open');
     });
   </script>
 </body>
