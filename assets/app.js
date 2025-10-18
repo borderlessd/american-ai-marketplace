@@ -303,3 +303,107 @@ document.addEventListener('DOMContentLoaded', () => {
     if (href === '' || href === '#'){ e.preventDefault(); }
   }, true);
 });
+
+/* =========================
+   HANDLE ?bid= ENVELOPE
+   - Works after /bid.html redirects to /index.html?bid=...
+   - Requires window.sb (Supabase client) already set up in app.js
+   ========================= */
+(function AIM_BID_ENVELOPE_HANDLER(){
+  const KEY = 'aim_pending_bid_b64u';
+
+  function b64uDecode(s){
+    try{
+      s = s.replace(/-/g,'+').replace(/_/g,'/');
+      const pad = s.length % 4; if (pad) s += '='.repeat(4-pad);
+      return decodeURIComponent(escape(atob(s)));
+    }catch(e){ return ''; }
+  }
+
+  function stripQueryParam(name){
+    try{
+      const url = new URL(location.href);
+      url.searchParams.delete(name);
+      history.replaceState(null, '', url.pathname + (url.search ? ('?'+url.searchParams.toString()) : '') + url.hash);
+    }catch(_){}
+  }
+
+  async function processEncodedBid(encoded){
+    if (!encoded) return;
+    // Remove the param from the URL ASAP to avoid re-processing on refresh
+    stripQueryParam('bid');
+
+    // Parse envelope: { payload:{...}, offer, notes }
+    let env = null;
+    try { env = JSON.parse(b64uDecode(encoded) || '{}'); } catch(_){}
+    if (!env || typeof env !== 'object' || !env.payload){
+      console.warn('[AIM] Bad bid envelope');
+      return;
+    }
+
+    // Ensure auth
+    if (!window.sb || !window.sb.auth){
+      // stash and ask to sign in
+      localStorage.setItem(KEY, encoded);
+      window.openAuth && window.openAuth();
+      return;
+    }
+    const { data: auth } = await window.sb.auth.getUser();
+    if (!auth?.user){
+      localStorage.setItem(KEY, encoded);
+      window.openAuth && window.openAuth();
+      return;
+    }
+
+    // Build DB row
+    const p = env.payload || {};
+    const row = {
+      load_number: p.load_number || p.load_id || null,
+      load_id:     p.load_id     || p.load_number || null,
+      route_from:  p.route_from  || '',
+      route_to:    p.route_to    || '',
+      item:        p.item        || 'Item',
+      miles:       (p.miles != null ? Number(p.miles) : null),
+      price_offer: Math.round(Number(env.offer || 0)),
+      notes:       env.notes || null,
+      auth_user_id: auth.user.id,
+      status:      'SUBMITTED',
+      created_at:  new Date().toISOString()
+    };
+
+    // Validate amount
+    if (!row.price_offer || !Number.isFinite(row.price_offer) || row.price_offer <= 0){
+      alert('Please enter a valid dollar amount.');
+      return;
+    }
+
+    try{
+      const { error } = await window.sb.from('bids').insert(row);
+      if (error) throw error;
+      localStorage.removeItem(KEY);
+      alert('Bid submitted! You can review it in Admin.');
+    }catch(e){
+      console.error('[AIM] bid insert failed', e);
+      alert((e && e.message) || 'Failed to submit bid.');
+    }
+  }
+
+  // 1) Handle fresh ?bid= in the URL
+  (function handleQueryNow(){
+    try{
+      const url = new URL(location.href);
+      const b = url.searchParams.get('bid');
+      if (b) processEncodedBid(b);
+    }catch(_){}
+  })();
+
+  // 2) If we asked the user to sign in, resume afterwards
+  (async function resumeIfPending(){
+    const pending = localStorage.getItem(KEY);
+    if (!pending) return;
+    try{
+      const { data } = await (window.sb?.auth?.getUser?.() || {});
+      if (data?.user) processEncodedBid(pending);
+    }catch(_){}
+  })();
+})();
