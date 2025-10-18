@@ -7,20 +7,26 @@
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
-  <!-- Top Nav -->
+  <!-- NAV -->
   <div class="nav">
     <div><a href="/index.html">American AI Marketplace</a></div>
     <div>
       <a href="/index.html">Home</a>
       <a href="/loads.html">Find Loads</a>
       <a href="/register.html">Register</a>
-      <!-- Admin link is revealed by app.js only when ?admin=true -->
+      <a id="myBidsLink" href="#" style="display:none;">My Bids (<span id="bidCount">0</span>)</a>
+      <a id="signinLink" href="#" onclick="openAuth();return false;">Sign In</a>
+      <a id="signoutLink" href="#" style="display:none;" onclick="signout();return false;">Sign Out</a>
+      <!-- Admin access only via ?admin=true -->
       <a id="adminLink" href="#" style="display:none"
          onclick="document.getElementById('gateModal').classList.add('open');return false;">Admin</a>
     </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <button id="darkToggle" class="btn secondary" style="padding:4px 8px;font-size:13px;">🌙 Dark</button>
+    </div>
   </div>
 
-  <!-- Hero -->
+  <!-- HERO -->
   <section class="hero">
     <h1>Move America, intelligently.</h1>
     <div class="wrap" style="text-align:center">
@@ -30,85 +36,133 @@
     </div>
   </section>
 
-  <!-- Main Content -->
+  <!-- CONTENT -->
   <div class="wrap">
-    <div class="controls">
+    <div class="controls" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
       <input id="q" class="input" placeholder="Search city, commodity, item…">
       <select id="commodity" class="input">
         <option value="">All commodities</option>
         <option>Vehicle</option><option>Boat</option><option>Motorcycle</option>
         <option>Household</option><option>LTL</option><option>Pets</option><option>Heavy Equipment</option>
       </select>
+      <div id="loads-pager-holder" style="margin-left:auto;display:flex;align-items:center;gap:10px;"></div>
     </div>
 
-    <!-- Cards grid populated by /assets/app.js -->
     <div id="grid" class="grid"></div>
+
+    <!-- Bottom pagination -->
+    <div id="pagerBottom" style="text-align:center;margin:20px 0;">
+      <button id="prevPage" class="btn secondary">Prev</button>
+      <span id="pageInfo">Page 1 / 1</span>
+      <button id="nextPage" class="btn secondary">Next</button>
+    </div>
   </div>
 
-  <!-- Footer -->
+  <!-- FOOTER -->
   <div class="footer">
-    <div class="wrap footer-note">
-      © American AI Marketplace
-    </div>
+    <div class="wrap footer-note">© American AI Marketplace</div>
   </div>
 
-  <!-- View Modal (load details) -->
-  <div id="viewModal" class="modal">
-    <div class="panel">
-      <div id="viewContent"></div>
-    </div>
-  </div>
+  <!-- VIEW MODAL -->
+  <div id="viewModal" class="modal"><div class="panel"><div id="viewContent"></div></div></div>
 
-  <!-- Carrier Auth Modal (sign in to bid) -->
-  <div id="authModal" class="modal">
-    <div class="panel">
-      <div class="title">Sign in</div>
-      <label>Email
-        <input id="authEmail" type="email" class="input" placeholder="name@example.com">
-      </label>
-      <div style="height:8px"></div>
-      <label>Password
-        <input id="authPass" type="password" class="input" placeholder="Enter your password">
-      </label>
-      <div id="authError" class="error"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-        <button class="btn secondary" onclick="document.getElementById('authModal').classList.remove('open')">Cancel</button>
-        <button class="btn" onclick="signin()">Continue</button>
-      </div>
+  <!-- AUTH MODAL -->
+  <div id="authModal" class="modal"><div class="panel">
+    <div class="title">Sign in</div>
+    <label>Email <input id="authEmail" type="email" class="input" placeholder="name@example.com"></label>
+    <div style="height:8px"></div>
+    <label>Password <input id="authPass" type="password" class="input" placeholder="Enter your password"></label>
+    <div id="authError" class="error"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn secondary" onclick="closeAuth()">Cancel</button>
+      <button class="btn" onclick="signin()">Continue</button>
     </div>
-  </div>
-
-  <!-- Admin Gate Modal (just routes to /admin/ after a simple check) -->
-  <div id="gateModal" class="modal">
-    <div class="panel">
-      <div class="title">Admin Access</div>
-      <label>Username
-        <input id="gateUser" class="input" placeholder="Enter a username">
-      </label>
-      <div style="height:8px"></div>
-      <label>Password
-        <input id="gatePass" type="password" class="input" placeholder="Enter your password">
-      </label>
-      <div id="gateError" class="error"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-        <button class="btn secondary" onclick="document.getElementById('gateModal').classList.remove('open')">Cancel</button>
-        <button class="btn" onclick="(function(){
-          const u = document.getElementById('gateUser').value.trim();
-          const p = document.getElementById('gatePass').value.trim();
-          const okU='admin', okP='market'; // change if you want
-          if(u===okU && p===okP){
-            sessionStorage.setItem('aim_admin_ok','1');
-            window.location.href='/admin/';
-          }else{
-            document.getElementById('gateError').textContent='Invalid username or password.';
-          }
-        })()">Enter</button>
-      </div>
+    <div style="text-align:center;margin-top:8px;font-size:13px;">
+      Don’t have an account? <a href="/register.html">Register now</a>
     </div>
-  </div>
+  </div></div>
 
-  <!-- Scripts: Supabase MUST load before app.js -->
+  <!-- ADMIN GATE -->
+  <div id="gateModal" class="modal"><div class="panel">
+    <div class="title">Admin Access</div>
+    <label>Username <input id="gateUser" class="input" placeholder="Enter a username"></label>
+    <div style="height:8px"></div>
+    <label>Password <input id="gatePass" type="password" class="input" placeholder="Enter your password"></label>
+    <div id="gateError" class="error"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn secondary" onclick="document.getElementById('gateModal').classList.remove('open')">Cancel</button>
+      <button class="btn" onclick="(function(){
+        const u=document.getElementById('gateUser').value.trim();
+        const p=document.getElementById('gatePass').value.trim();
+        const okU='admin', okP='market';
+        if(u===okU && p===okP){
+          sessionStorage.setItem('aim_admin_ok','1');
+          window.location.href='/admin/';
+        }else{
+          document.getElementById('gateError').textContent='Invalid username or password.';
+        }
+      })()">Enter</button>
+    </div>
+  </div></div>
+
+  <!-- SCRIPTS -->
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script src="/assets/app.js"></script>
+
+  <!-- DARK MODE -->
+  <script>
+    (function(){
+      const btn=document.getElementById('darkToggle');
+      function apply(){
+        const dark=localStorage.getItem('aim_dark')==='1';
+        document.body.classList.toggle('dark',dark);
+        if(btn)btn.textContent=dark?'☀️ Light':'🌙 Dark';
+      }
+      if(btn){
+        btn.addEventListener('click',()=>{
+          const next=document.body.classList.toggle('dark');
+          localStorage.setItem('aim_dark',next?'1':'0');
+          btn.textContent=next?'☀️ Light':'🌙 Dark';
+        });
+      }
+      apply();
+    })();
+  </script>
+
+  <!-- USER + BIDS STATUS -->
+  <script>
+    document.addEventListener('DOMContentLoaded',()=>{
+      const supabaseUrl="https://xntxctjjtfjeznircuas.supabase.co";
+      const supabaseKey="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+      const client=supabase.createClient(supabaseUrl,supabaseKey);
+      const signinLink=document.getElementById('signinLink');
+      const signoutLink=document.getElementById('signoutLink');
+      const myBidsLink=document.getElementById('myBidsLink');
+      const bidCount=document.getElementById('bidCount');
+
+      client.auth.getUser().then(async({data})=>{
+        if(data.user){
+          signinLink.style.display='none';
+          signoutLink.style.display='inline';
+          myBidsLink.style.display='inline';
+          // Count this user's bids
+          const {data:bids}=await client.from('bids')
+            .select('id',{count:'exact'})
+            .eq('user_id',data.user.id);
+          if(bids && bidCount) bidCount.textContent=bids.length||0;
+        }else{
+          signinLink.style.display='inline';
+          signoutLink.style.display='none';
+          myBidsLink.style.display='none';
+        }
+      });
+
+      window.signout=async()=>{
+        await client.auth.signOut();
+        localStorage.removeItem('aim_token');
+        location.reload();
+      };
+    });
+  </script>
 </body>
 </html>
