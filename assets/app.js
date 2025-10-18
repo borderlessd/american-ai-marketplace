@@ -1,4 +1,4 @@
-/* =========================================================================
+=/* =========================================================================
    /assets/app.js — rock-solid render + bid
    ========================================================================= */
 
@@ -435,3 +435,216 @@ document.addEventListener('DOMContentLoaded', ()=>{
   setTimeout(unblockOverlays, 200);
   setTimeout(unblockOverlays, 800);
 });
+
+/* ======================================================================
+   FINAL: Card-Embedded Payload + Click Guard (append-only, safe)
+   - After every render(list), stamp each .load-card with:
+       data-aim-id       (stable key)
+       data-aim-payload  (JSON snapshot to submit)
+   - Delegated click handler cancels anchors, opens Bid without scroll
+   - submitBid will prefer dataset payload (no more "Load not found")
+   ====================================================================== */
+(function cardPayloadAndGuards(){
+  // ---------- helpers ----------
+  const pick = (...xs)=>{ for(const x of xs){ if(x!=null && x!=='') return x; } return ''; };
+  const fromCity = l => pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from);
+  const toCity   = l => pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to);
+  const dateStr  = l => { const r = pick(l.date,l.available,l.availableDate,l.pickup_date,l.pickupDate,l.readyDate,l.date_available); return r?String(r):''; };
+  const itemName = l => pick(l.item,l.vehicle,l.commodity,'Item');
+  const safeMilesNum = (m)=>{ const n=(typeof m==='string')?Number(m.replace(/,/g,'')):Number(m); return Number.isFinite(n)?n:null; };
+  const makeKey  = l => {
+    const k = l?.load_number || l?.id || l?.uuid || l?.key;
+    if (k) return String(k);
+    return `${fromCity(l)||'FROM'}-${toCity(l)||'TO'}-${dateStr(l)||''}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
+  };
+  const getIds = l => {
+    const ln = l?.load_number || l?.loadNo || l?.loadNum;
+    const id = l?.id || l?.uuid || l?.key;
+    const ident = ln || id || makeKey(l);
+    return { load_number: String(ident), load_id: String(id || ident) };
+  };
+  function snapshotFromLoad(l){
+    if (!l) return null;
+    const ids = getIds(l);
+    return {
+      __key: makeKey(l),
+      load_number: ids.load_number,
+      load_id: ids.load_id,
+      route_from: fromCity(l) || '',
+      route_to: toCity(l) || '',
+      item: itemName(l) || 'Item',
+      miles: safeMilesNum(l.miles),
+      available: dateStr(l) || ''
+    };
+  }
+
+  // ---------- wrap render(list) once: stamp cards with payload ----------
+  if (typeof window.render === 'function' && !window.render.__aim_stamp){
+    const orig = window.render;
+    window.render = function(list){
+      const out = orig.apply(this, arguments);
+      try{
+        const arr = Array.isArray(list) ? list : [];
+        const cards = Array.from(document.querySelectorAll('#grid .load-card, #grid .card'));
+        cards.forEach((el,i)=>{
+          const obj = arr[i];
+          if (!obj) return;
+          const key = makeKey(obj);
+          const payload = snapshotFromLoad(obj);
+          if (key) el.dataset.aimId = key;
+          if (payload){
+            // store compact JSON on the element
+            try { el.dataset.aimPayload = JSON.stringify(payload); } catch(_){}
+          }
+        });
+        // keep last list for any legacy lookups
+        window.__lastList = arr.slice();
+      }catch(_){}
+      return out;
+    };
+    window.render.__aim_stamp = true;
+  }
+
+  // ---------- global click guard: stop scroll-to-top & handle Bid ----------
+  if (!document.__aimClickGuard){
+    document.__aimClickGuard = true;
+
+    document.addEventListener('click', (e)=>{
+      const a = e.target.closest('a');
+      if (a && (a.getAttribute('href')==='#' || a.getAttribute('href')==='' || a.getAttribute('href')?.startsWith('#'))){
+        // kill default "jump to top" anchors
+        e.preventDefault();
+      }
+    }, true);
+
+    document.addEventListener('click', (e)=>{
+      const btn = e.target.closest('button, a');
+      if (!btn) return;
+
+      // Treat element as a Bid button if it has "btn" class and text contains "bid"
+      const looksBid = /(^|\s)btn(\s|$)/.test(btn.className||'') && /bid/i.test(btn.textContent||'');
+      if (!looksBid) return;
+
+      const card = btn.closest('.load-card, .card');
+      if (!card) return;
+
+      // stop link navigation & bubbling that could scroll the page
+      e.preventDefault();
+      e.stopPropagation();
+
+      // read embedded payload; fall back to dataset key
+      const payloadStr = card.dataset?.aimPayload || '';
+      const key = card.dataset?.aimId || null;
+      let snap = null;
+      if (payloadStr){
+        try { snap = JSON.parse(payloadStr); } catch(_){}
+      }
+      // Save snapshot/key for submit
+      window.__aimBidSnapshot = snap || null;
+      window.__currentBidKey = (snap && snap.__key) || key || null;
+
+      // auth check (cached if present)
+      const uid = (window.__aimAuth && window.__aimAuth.uid) || null;
+      if (!uid){
+        (typeof window.openAuth==='function' ? window.openAuth() : document.getElementById('authModal')?.classList.add('open'));
+        return;
+      }
+      (typeof window.openBidModal==='function' ? window.openBidModal() : document.getElementById('bidModal')?.classList.add('open'));
+    }, true);
+  }
+
+  // ---------- submitBid override: prefer embedded payload ----------
+  (function patchSubmit(){
+    const orig = (typeof window.submitBid === 'function') ? window.submitBid : null;
+    window.submitBid = async function(){
+      const err = document.getElementById('bidError');
+      const amtEl = document.getElementById('bidAmount');
+      const notesEl = document.getElementById('bidNotes');
+
+      // validate amount
+      const raw = (amtEl?.value || '').trim();
+      const amount = Number(raw);
+      if (!raw || !Number.isFinite(amount) || amount <= 0){
+        if (err) err.textContent = 'Please enter a valid dollar amount.'; 
+        return;
+      }
+
+      // resolve user id quickly
+      let uid = (window.__aimAuth && window.__aimAuth.uid) || null;
+      if (!uid && window.sb?.auth){
+        try { const { data } = await sb.auth.getUser(); uid = data?.user?.id || null; } catch(_){}
+      }
+      if (!uid){ (typeof window.openAuth==='function'? window.openAuth() : document.getElementById('authModal')?.classList.add('open')); return; }
+
+      // prefer the snapshot we stamped on the card
+      let snap = window.__aimBidSnapshot || null;
+
+      // fallback: try to resolve via key → __lastList
+      if (!snap){
+        const key = window.__currentBidKey || null;
+        const list = Array.isArray(window.__lastList) ? window.__lastList : [];
+        const obj = key ? list.find(x => makeKey(x) === key) : null;
+        if (obj) snap = snapshotFromLoad(obj);
+      }
+
+      // last resort: locate the first visible .load-card and parse (should rarely happen)
+      if (!snap){
+        const card = document.querySelector('#grid .load-card, #grid .card');
+        if (card){
+          // very light parse
+          const routeTxt = (card.querySelector('.route')?.textContent||'').trim();
+          let route_from='', route_to='';
+          if (routeTxt.includes('→')){
+            const [f,t] = routeTxt.split('→'); route_from=(f||'').trim(); route_to=(t||'').replace(/\s+OPEN|CLOSED|ACTIVE|PENDING.*/i,'').trim();
+          }
+          const metas = Array.from(card.querySelectorAll('.meta')).map(x=>x.textContent.trim());
+          const item  = (metas.find(t=>/^item:/i.test(t))||'').replace(/^item:\s*/i,'').trim();
+          const miles = (metas.find(t=>/^miles:/i.test(t))||'').replace(/[^0-9]/g,'');
+          const date  = (metas.find(t=>/^first available date:/i.test(t))||'').replace(/^first available date:\s*/i,'').trim();
+          const key   = card.dataset?.aimId || null;
+          const ids   = getIds({ load_number:key });
+          snap = {
+            __key: key || null,
+            load_number: ids.load_number,
+            load_id: ids.load_id,
+            route_from, route_to,
+            item: item || 'Item',
+            miles: miles ? Number(miles) : null,
+            available: date
+          };
+        }
+      }
+
+      if (!snap){
+        if (err) err.textContent = 'Load not found.';
+        return;
+      }
+
+      const ids = getIds({ load_number: snap.load_number, id: snap.load_id });
+      const payload = {
+        load_number: ids.load_number,
+        load_id: ids.load_id,
+        route_from: snap.route_from || '',
+        route_to: snap.route_to || '',
+        item: snap.item || 'Item',
+        miles: (typeof snap.miles==='number' ? snap.miles : null),
+        price_offer: Math.round(amount),
+        notes: (notesEl?.value || '').trim() || null,
+        auth_user_id: uid,
+        status: 'SUBMITTED',
+        created_at: new Date().toISOString()
+      };
+
+      try{
+        const { error } = await (window.sb ? sb.from('bids').insert(payload) : Promise.reject(new Error('No DB client')));
+        if (error) throw error;
+        (typeof window.closeBidModal==='function' ? window.closeBidModal() : document.getElementById('bidModal')?.classList.remove('open'));
+        alert('Bid submitted! You can review it in Admin.');
+        window.__aimBidSnapshot = null; // clear
+      }catch(e){
+        console.error('Bid insert failed:', e);
+        if (err) err.textContent = e.message || 'Failed to submit bid.';
+      }
+    };
+  })();
+})();
