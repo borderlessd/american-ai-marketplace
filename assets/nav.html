@@ -1,0 +1,18 @@
+<!-- /assets/nav.html -->
+<div class="nav-inner" style="display:flex;align-items:center;gap:16px;width:100%;">
+  <div><a href="/">American AI Marketplace</a></div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;">
+    <a data-link="home" href="/">Home</a>
+    <a data-link="register" href="/register.html">Register</a>
+    <a id="myBidsLink" href="#" style="display:none;" title="Feature coming soon">
+      My Bids (<span id="bidCount">0</span>)
+    </a>
+    <a id="signinLink" href="#" onclick="return false;">Sign In</a>
+    <a id="signoutLink" href="#" style="display:none;" onclick="return false;">Sign Out</a>
+    <!-- Admin is only visible when ?admin=true (also enforced in nav.js) -->
+    <a id="adminLink" href="#" style="display:none;">Admin</a>
+  </div>
+  <div style="margin-left:auto;">
+    <button id="darkToggle" class="btn secondary" style="padding:4px 8px;font-size:13px;">🌙 Dark</button>
+  </div>
+</div>
