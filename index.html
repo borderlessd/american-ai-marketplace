@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>American AI Marketplace</title>
   <link rel="stylesheet" href="/assets/styles.css">
-  <!-- Dark-mode overrides so you don't have to edit styles.css right now -->
   <style>
+    /* Dark mode (kept inline for simplicity) */
     body.dark{background:#0f1115;color:#e7eaf0}
     body.dark .nav{background:#141823;border-bottom:1px solid #222736}
     body.dark .nav a{color:#e7eaf0}
@@ -25,15 +25,15 @@
 <body>
   <!-- NAV -->
   <div class="nav">
-    <div><a href="/index.html">American AI Marketplace</a></div>
+    <div><a href="/">American AI Marketplace</a></div>
     <div>
-      <a href="/index.html">Home</a>
-      <a href="/loads.html">Find Loads</a>
+      <a href="/">Home</a>
+      <!-- Removed separate "Find Loads" page -->
       <a href="/register.html">Register</a>
       <a id="myBidsLink" href="#" style="display:none;">My Bids (<span id="bidCount">0</span>)</a>
       <a id="signinLink" href="#" onclick="openAuth();return false;">Sign In</a>
       <a id="signoutLink" href="#" style="display:none;" onclick="signout();return false;">Sign Out</a>
-      <!-- Admin link only revealed when ?admin=true (handled by app.js) -->
+      <!-- Admin link only revealed when ?admin=true (handled in app.js) -->
       <a id="adminLink" href="#" style="display:none"
          onclick="document.getElementById('gateModal').classList.add('open');return false;">Admin</a>
     </div>
@@ -62,14 +62,14 @@
         <option>Vehicle</option><option>Boat</option><option>Motorcycle</option>
         <option>Household</option><option>LTL</option><option>Pets</option><option>Heavy Equipment</option>
       </select>
-      <!-- IMPORTANT: toolbar will be injected here on the RIGHT -->
+      <!-- toolbar injected here on the RIGHT -->
       <div id="loads-pager-holder" style="margin-left:auto;display:flex;align-items:center;gap:10px;"></div>
     </div>
 
     <!-- Cards grid (populated by /assets/app.js) -->
     <div id="grid" class="grid"></div>
 
-    <!-- Bottom pagination (wired by script below) -->
+    <!-- Bottom pagination -->
     <div id="pagerBottom" style="text-align:center;margin:20px 0;">
       <button id="prevPage" class="btn secondary">Prev</button>
       <span id="pageInfo">Page 1 / 1</span>
@@ -128,33 +128,30 @@
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script src="/assets/app.js"></script>
 
-  <!-- Enhancements: dark mode + toolbar (pager + sort) + navbar auth wiring + auth modal helpers -->
+  <!-- Enhancements: dark mode + toolbar (pager+sort) + navbar auth + auth modal helpers -->
   <script>
-  /* -------- Dark mode -------- */
+  /* --- Dark mode --- */
   (function(){
     const btn = document.getElementById('darkToggle');
-    function apply() {
+    function apply(){
       const dark = localStorage.getItem('aim_dark') === '1';
       document.body.classList.toggle('dark', dark);
       if (btn) btn.textContent = dark ? '☀️ Light' : '🌙 Dark';
     }
-    if (btn) {
-      btn.addEventListener('click', () => {
-        const next = !document.body.classList.contains('dark');
-        localStorage.setItem('aim_dark', next ? '1' : '0');
-        apply();
-      });
-    }
+    if (btn) btn.addEventListener('click', () => {
+      const next = !document.body.classList.contains('dark');
+      localStorage.setItem('aim_dark', next ? '1' : '0');
+      apply();
+    });
     apply();
   })();
 
-  /* -------- Pagination + Sort toolbar (non-destructive; works with existing cards) -------- */
+  /* --- Pagination + Sort toolbar (uniform ▲/▼) --- */
   (function(){
     const $  = (q, el=document) => el.querySelector(q);
     const $$ = (q, el=document) => Array.from(el.querySelectorAll(q));
     const holder = document.getElementById('loads-pager-holder') || document.querySelector('.controls');
 
-    // Build toolbar with UNIFORM ▲ ▼ icons (&#9650; / &#9660;)
     const bar = document.createElement('div');
     bar.id = 'loads-pager-toolbar';
     bar.style.display = 'flex';
@@ -201,8 +198,6 @@
 
     const state = { page: 1, pageSize: 25, total: 0 };
 
-    function text(el, sel){ return (el.querySelector(sel)?.textContent || '').trim(); }
-
     function parseCardData(card){
       // Miles
       const milesLine = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
@@ -212,7 +207,7 @@
         const m = milesLine.match(/miles:\s*([\d,]+)/i);
         if (m) miles = Number(m[1].replace(/,/g,''));
       }
-      // Available
+      // Available date
       const availLine = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
         .find(t => /^first available date:/i.test(t));
       let avail = 0;
@@ -227,17 +222,17 @@
         const txt = priceEl.textContent.replace(/[^0-9.]/g,'');
         if (txt) price = Number(txt);
       }
-      // Route + Item for alpha sorts
-      const route = text(card, '.route');
+      // Route + Item
+      const route = (card.querySelector('.route')?.textContent || '').trim().toLowerCase();
       const item  = (Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
-                      .find(t => /^item:/i.test(t)) || '').replace(/^item:\s*/i,'').trim();
-      return { miles, avail, price, route: route.toLowerCase(), item: item.toLowerCase() };
+                      .find(t => /^item:/i.test(t)) || '').replace(/^item:\s*/i,'').trim().toLowerCase();
+      return { miles, avail, price, route, item };
     }
 
     function getCards(){
-      let nodes = $$('.load-card');
+      let nodes = Array.from(document.querySelectorAll('.load-card'));
       if (nodes.length) return nodes;
-      return $$('.card');
+      return Array.from(document.querySelectorAll('.card'));
     }
 
     function sortCards(kind){
@@ -290,7 +285,7 @@
       state.page = 1;
       applyPagination();
 
-      // Re-apply after the grid re-renders (e.g., search/commodity filter)
+      // re-apply after grid re-renders (search/commodity)
       const mo = new MutationObserver(() => {
         clearTimeout(initOnce._t);
         initOnce._t = setTimeout(() => {
@@ -301,7 +296,7 @@
       });
       mo.observe(grid, { childList: true });
 
-      // Wire controls
+      // wire controls
       const ppSel  = document.getElementById('ppSel');
       const sSel   = document.getElementById('sortSel');
       const prev   = document.getElementById('pagerPrev');
@@ -337,7 +332,7 @@
       return true;
     }
 
-    // Try until cards render
+    // try until cards render
     const started = Date.now();
     const t = setInterval(() => {
       if (initOnce()) { clearInterval(t); return; }
@@ -345,7 +340,7 @@
     }, 200);
   })();
 
-  /* -------- Navbar auth + My Bids count (uses sb from app.js) -------- */
+  /* --- Navbar auth + My Bids count (uses sb from app.js) --- */
   (function(){
     document.addEventListener('DOMContentLoaded', async () => {
       const signinLink = document.getElementById('signinLink');
@@ -359,11 +354,14 @@
           if (signinLink) signinLink.style.display = 'none';
           if (signoutLink) signoutLink.style.display = 'inline';
           if (myBidsLink)  myBidsLink.style.display  = 'inline';
+
           const { data: rows } = await sb
             .from('bids')
             .select('id', { count:'exact', head:false })
             .eq('auth_user_id', data.user.id);
+
           if (Array.isArray(rows) && bidCountEl) bidCountEl.textContent = rows.length || 0;
+
           window.signout = async () => { await sb.auth.signOut(); localStorage.removeItem('aim_token'); location.reload(); };
         } else {
           if (signinLink) signinLink.style.display = 'inline';
@@ -375,7 +373,7 @@
     });
   })();
 
-  /* -------- Auth modal helpers (so menu Sign In + Bid can open it) -------- */
+  /* --- Auth modal helpers (so menu Sign In + Bid can open it) --- */
   (function(){
     window.openAuth  = () => document.getElementById('authModal')?.classList.add('open');
     window.closeAuth = () => document.getElementById('authModal')?.classList.remove('open');
