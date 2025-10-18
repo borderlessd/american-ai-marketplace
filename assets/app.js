@@ -1,11 +1,11 @@
 /* =========================================================================
-   /assets/app.js — deterministic render + bid (no index, no scroll)
+   /assets/app.js — rock-solid bid flow (keyed cards, no index, no scroll)
    ========================================================================= */
 
 let LOADS = [];
 let sb = null;
 
-//// ---------- SUPABASE (optional if you use it) ----------
+// ---------- Supabase (optional; enable if keys are present) ----------
 try {
   if (window.supabase && window.SUPABASE_URL && window.SUPABASE_KEY) {
     sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_KEY);
@@ -15,11 +15,11 @@ try {
   console.warn('Supabase init failed:', e);
 }
 
-//// ---------- helpers ----------
+// ---------- tiny helpers ----------
 const $  = (q, el=document) => el.querySelector(q);
 const $$ = (q, el=document) => Array.from(el.querySelectorAll(q));
 const fmt = (n) => new Intl.NumberFormat().format(n);
-const pick = (...xs)=>{ for(const x of xs){ if(x!=null && x!=='') return x; } return ''; };
+const pick = (...xs)=>{ for (const x of xs){ if(x!=null && x!=='') return x; } return ''; };
 
 function fromCity(l){ return pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from); }
 function toCity(l){   return pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to); }
@@ -44,12 +44,18 @@ function priceHTML(l){
   }
   return '';
 }
-function stableId(l){
-  return (l.load_number || l.id || `${fromCity(l)||'FROM'}-${toCity(l)||'TO'}-${dateStr(l)||''}`)
-    .toString().replace(/\s+/g,'_').toUpperCase().slice(0,64);
+function stableKey(l){
+  // deterministic id per load, independent of sorting/pagination
+  const base = (l.load_number || l.id || `${fromCity(l)||'FROM'}-${toCity(l)||'TO'}-${dateStr(l)||''}`)
+    .toString().trim();
+  return base.replace(/\s+/g,'_').toUpperCase().slice(0,64);
 }
 
-//// ---------- data ----------
+// ---------- global state for keyed lookup ----------
+const CARD_MAP = new Map();   // key -> load payload used to render that card
+let CURRENT_KEY = null;       // key for the card whose Bid modal is open
+
+// ---------- data ----------
 async function loadData(){
   try{
     const res = await fetch('/assets/loads.json?ts=' + Date.now(), { cache:'no-store' });
@@ -62,9 +68,10 @@ async function loadData(){
   applyFilters();
 }
 
-//// ---------- render ----------
+// ---------- render ----------
 function render(list){
   const grid = $('#grid'); if (!grid) return;
+  CARD_MAP.clear();
 
   grid.innerHTML = list.map(l => {
     const routeFrom  = fromCity(l) || '';
@@ -74,23 +81,23 @@ function render(list){
     const date       = dateStr(l);
     const item       = itemName(l);
     const priceBlock = priceHTML(l);
+    const key        = stableKey(l);
 
-    // bake payload into the button (no index dependence)
-    const payload = {
-      load_number: stableId(l),
-      load_id:     l.id || l.load_number || stableId(l),
+    // Cache the exact payload this card will use for Bid
+    CARD_MAP.set(key, {
+      key,
+      load_number: key,
+      load_id:     l.id || l.load_number || key,
       route_from:  routeFrom,
       route_to:    routeTo,
-      item:        item,
+      item,
       miles:       miles? Number(miles) : null,
       date:        date || '',
-      price:       (typeof l.price==='number' ? l.price : null),
-      status:      status
-    };
-    const dataLoad = JSON.stringify(payload).replace(/'/g,"&apos;");
+      status
+    });
 
     return `
-      <article class="card load-card">
+      <article class="card load-card" data-aim-id="${key}">
         <div class="route">${routeFrom} → ${routeTo} <span class="status ${status.toLowerCase()}">${status}</span></div>
         <div class="meta"><strong>Item:</strong> ${item}</div>
         <div class="meta"><strong>Miles:</strong> ${miles ? fmt(miles) : ''}</div>
@@ -98,7 +105,7 @@ function render(list){
         ${priceBlock}
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
           <button type="button" class="btn secondary view-btn">View</button>
-          <button type="button" class="btn bid-btn" data-load='${dataLoad}'>Bid</button>
+          <button type="button" class="btn bid-btn">Bid</button>
         </div>
       </article>
     `;
@@ -107,7 +114,7 @@ function render(list){
   applySortAndPagination();
 }
 
-//// ---------- filters ----------
+// ---------- filters ----------
 function applyFilters(){
   const term = ($('#q')?.value||'').toLowerCase();
   const comm = ($('#commodity')?.value||'').toLowerCase();
@@ -127,7 +134,7 @@ function applyFilters(){
   render(list);
 }
 
-//// ---------- sort + pagination (UI optional) ----------
+// ---------- sort + pagination ----------
 const pagerState = { page:1, pageSize:25 };
 function getCards(){ return Array.from(document.querySelectorAll('#grid .load-card, #grid .card')); }
 
@@ -200,7 +207,7 @@ function wireSortAndPaginationOnce(){
   });}
 }
 
-//// ---------- modal & auth ----------
+// ---------- modals ----------
 function ensureBidModal(){
   if (document.getElementById('bidModal')) return;
   const tpl = document.createElement('div');
@@ -226,6 +233,7 @@ function ensureBidModal(){
 }
 function openAuth(){ $('#authModal')?.classList.add('open'); }
 function closeAuth(){ $('#authModal')?.classList.remove('open'); }
+
 async function signin(){
   const err = $('#authError');
   try{
@@ -238,20 +246,22 @@ async function signin(){
     closeAuth(); location.reload();
   }catch(e){ if(err) err.textContent = e.message || 'Sign-in failed.'; }
 }
+window.signin = signin; // used by HTML button
 
-//// ---------- event wiring ----------
-let CURRENT_PAYLOAD = null;
-
+// ---------- event wiring (kills anchors, uses keyed cards) ----------
 function wireGlobalEvents(){
-  // kill anchor jump-to-top
+  // 1) Kill default "#" anchors to stop jump-to-top
   document.addEventListener('click', (e)=>{
     const a = e.target.closest('a');
     if (!a) return;
     const href = a.getAttribute('href')||'';
-    if (href==='' || href==='#'){ e.preventDefault(); e.stopPropagation(); }
+    if (href==='' || href==='#'){
+      e.preventDefault();
+      e.stopPropagation();
+    }
   }, true);
 
-  // grid delegation: View and Bid
+  // 2) Grid delegation: View and Bid from the card itself
   const grid = $('#grid');
   if (!grid || grid.__wired) return;
   grid.__wired = true;
@@ -266,24 +276,18 @@ function wireGlobalEvents(){
     const card = e.target.closest('.load-card, .card');
     if (!card) return;
 
-    if (viewBtn){
-      // reconstruct a minimal load for the view modal from the card DOM
-      const route = (card.querySelector('.route')?.textContent||'').split('→');
-      const rf = (route[0]||'').trim();
-      const rt = (route[1]||'').replace(/\s+(OPEN|ACTIVE|CLOSED|PENDING).*/i,'').trim();
-      const meta = $$('.meta', card).map(x=>x.textContent.trim());
-      const item = (meta.find(t=>/^item:/i.test(t))||'').replace(/^item:\s*/i,'').trim() || 'Item';
-      const miles= (meta.find(t=>/^miles:/i.test(t))||'').replace(/[^0-9]/g,'');
-      const avail= (meta.find(t=>/^first available date:/i.test(t))||'').replace(/^first available date:\s*/i,'').trim();
+    const key = card.dataset.aimId;
+    const payload = key ? CARD_MAP.get(key) : null;
 
-      const fake = { item, from_city: rf, to_city: rt, miles: miles?Number(miles):'', date: avail, price: null, status: 'OPEN' };
+    if (viewBtn){
       const box = $('#viewContent');
       if (box){
+        const miles = (payload?.miles!=null ? fmt(payload.miles) : '');
         box.innerHTML = `
-          <div class="title">${item}</div>
-          <div class="meta"><strong>Route:</strong> ${rf} → ${rt}</div>
-          <div class="meta"><strong>Miles:</strong> ${miles?fmt(miles):''}</div>
-          <div class="meta"><strong>First Available Date:</strong> ${avail}</div>
+          <div class="title">${payload?.item || 'Item'}</div>
+          <div class="meta"><strong>Route:</strong> ${(payload?.route_from||'')} → ${(payload?.route_to||'')}</div>
+          <div class="meta"><strong>Miles:</strong> ${miles}</div>
+          <div class="meta"><strong>First Available Date:</strong> ${(payload?.date||'')}</div>
         `;
         $('#viewModal')?.classList.add('open');
       }
@@ -291,21 +295,16 @@ function wireGlobalEvents(){
     }
 
     if (bidBtn){
-      // read baked payload
-      let payload = null;
-      try { payload = JSON.parse(bidBtn.getAttribute('data-load')||'{}'); } catch(_){}
-      if (!payload){
-        alert('Could not read load info.'); return;
-      }
+      if (!payload){ alert('Load not found.'); return; }
 
-      // auth gate
+      // require auth
       try{
         if (!sb?.auth){ openAuth(); return; }
         const { data } = await sb.auth.getUser();
         if (!data?.user){ openAuth(); return; }
       }catch(_){ openAuth(); return; }
 
-      CURRENT_PAYLOAD = payload;
+      CURRENT_KEY = payload.key;
       ensureBidModal();
       const sum = $('#bidSummary');
       if (sum){
@@ -324,7 +323,7 @@ function wireGlobalEvents(){
     }
   });
 
-  // modal buttons
+  // 3) Modal buttons
   document.addEventListener('click', async (e)=>{
     if (e.target.id === 'bidCancel'){
       $('#bidModal')?.classList.remove('open');
@@ -337,30 +336,40 @@ function wireGlobalEvents(){
         if (errEl) errEl.textContent = 'Please enter a valid dollar amount.';
         return;
       }
-      if (!CURRENT_PAYLOAD){ if (errEl) errEl.textContent='Load not found.'; return; }
+      if (!CURRENT_KEY || !CARD_MAP.has(CURRENT_KEY)){
+        if (errEl) errEl.textContent = 'Load not found.';
+        return;
+      }
+      const p = CARD_MAP.get(CURRENT_KEY);
 
-      // If you are NOT using Supabase, replace below with your own POST.
-      if (!sb){ alert('Bid submitted (demo).'); $('#bidModal')?.classList.remove('open'); return; }
+      if (!sb){
+        alert('Bid submitted (demo).'); 
+        $('#bidModal')?.classList.remove('open'); 
+        return;
+      }
 
       try{
         const { data } = await sb.auth.getUser();
         const uid = data?.user?.id;
         if (!uid){ openAuth(); return; }
+
         const row = {
-          load_number: CURRENT_PAYLOAD.load_number || CURRENT_PAYLOAD.load_id,
-          load_id:     CURRENT_PAYLOAD.load_id || CURRENT_PAYLOAD.load_number,
-          route_from:  CURRENT_PAYLOAD.route_from || '',
-          route_to:    CURRENT_PAYLOAD.route_to || '',
-          item:        CURRENT_PAYLOAD.item || 'Item',
-          miles:       (CURRENT_PAYLOAD.miles!=null? Number(CURRENT_PAYLOAD.miles): null),
+          load_number: p.load_number || p.load_id,
+          load_id:     p.load_id || p.load_number,
+          route_from:  p.route_from || '',
+          route_to:    p.route_to || '',
+          item:        p.item || 'Item',
+          miles:       (p.miles!=null? Number(p.miles): null),
           price_offer: Math.round(amount),
           notes:       ($('#bidNotes')?.value||'').trim() || null,
           auth_user_id: uid,
           status:      'SUBMITTED',
           created_at:  new Date().toISOString()
         };
+
         const { error } = await sb.from('bids').insert(row);
         if (error) throw error;
+
         $('#bidModal')?.classList.remove('open');
         alert('Bid submitted! You can review it in Admin.');
       }catch(e){
@@ -371,9 +380,9 @@ function wireGlobalEvents(){
   });
 }
 
-//// ---------- boot ----------
+// ---------- boot ----------
 document.addEventListener('DOMContentLoaded', ()=>{
-  // show Admin link only when ?admin=true
+  // Show Admin link only with ?admin=true
   try{
     const url = new URL(location.href);
     const adminFlag = url.searchParams.get('admin')==='true';
