@@ -378,5 +378,32 @@
     window.closeAuth = () => document.getElementById('authModal')?.classList.remove('open');
   })();
   </script>
+  <!-- Bid Modal (carriers) -->
+<div id="bidModal" class="modal">
+  <div class="panel">
+    <div class="title">Submit a Bid</div>
+    <label>Offer Amount (USD)
+      <input id="bidAmount" type="number" step="1" min="1" class="input" placeholder="e.g. 1299">
+    </label>
+    <div style="height:8px"></div>
+    <label>Notes (optional)
+      <input id="bidNotes" class="input" placeholder="Any extra details…">
+    </label>
+    <div id="bidError" class="error"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn secondary" onclick="closeBidModal()">Cancel</button>
+      <button class="btn" onclick="submitBid()">Submit Bid</button>
+    </div>
+  </div>
+</div>
+<script>
+  // Bring back the tooltip on "My Bids"
+  (function(){
+    const link = document.getElementById('myBidsLink');
+    if (link) {
+      link.title = 'Feature coming soon';
+    }
+  })();
+</script>
 </body>
 </html>
