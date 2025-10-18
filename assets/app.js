@@ -397,3 +397,173 @@ document.addEventListener('DOMContentLoaded', ()=>{
   wireGridDelegation();   // <-- critical: one delegated handler on the grid
   loadData();
 });
+
+/* ======= AIM HOTFIX: bulletproof Bid + mobile behavior (append-only) ======= */
+(function(){
+  // Treat anything that *looks* like a Bid button as a bid trigger (no HTML edits required)
+  function isBidButton(el){
+    if (!el) return false;
+    if (/bid-btn/.test(el.className||'')) return true;
+    const txt = (el.textContent||'').trim().toLowerCase();
+    return /^(bid|place bid)$/.test(txt);
+  }
+
+  // Build a stable key from a rendered card element (in case our map was cleared)
+  function keyFromCard(card){
+    if (!card) return null;
+    const key = card.dataset && card.dataset.aimId;
+    if (key) return key;
+    // Fallback: compose a deterministic key from visible text (robust to re-renders)
+    const route = (card.querySelector('.route')?.textContent||'').trim();
+    const avail = (Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
+                  .find(t=>/^first available date:/i.test(t))||'').replace(/^first available date:\s*/i,'').trim();
+    const composed = (route + '|' + avail).toUpperCase().replace(/\s+/g,'_').slice(0,64);
+    return composed || null;
+  }
+
+  // Extract all the fields we need directly from the card DOM (so we never depend on indices)
+  function payloadFromCard(card){
+    if (!card) return null;
+    const routeTxt = (card.querySelector('.route')?.textContent||'').trim();
+    const m = routeTxt.match(/^(.*?)\s*→\s*(.*?)\s/);
+    const route_from = m ? m[1].trim() : '';
+    const route_to   = m ? m[2].trim() : '';
+    const itemLine = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim()).find(t=>/^item:/i.test(t))||'';
+    const item = itemLine.replace(/^item:\s*/i,'').trim() || 'Item';
+    const milesLine = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim()).find(t=>/^miles:/i.test(t))||'';
+    let miles = milesLine.match(/([\d,\.]+)/); miles = miles ? Number(String(miles[1]).replace(/,/g,'')) : null;
+    const availLine = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim()).find(t=>/^first available date:/i.test(t))||'';
+    const date = availLine.replace(/^first available date:\s*/i,'').trim();
+    const key = keyFromCard(card) || (route_from+'_'+route_to+'_'+date).toUpperCase().replace(/\s+/g,'_').slice(0,64);
+    return {
+      key,
+      load_number: key,
+      load_id: key,
+      route_from, route_to, item,
+      miles: Number.isFinite(miles) ? miles : null,
+      date
+    };
+  }
+
+  // Stop any empty/# anchors from hijacking scroll (some themes do this)
+  document.addEventListener('click', (e)=>{
+    const a = e.target.closest('a');
+    if (!a) return;
+    const href = a.getAttribute('href')||'';
+    if (href==='' || href==='#'){ e.preventDefault(); e.stopPropagation(); }
+  }, true);
+
+  // Ensure there *is* a Bid modal in the page (harmless if you already have one)
+  function ensureBidModal(){
+    if (document.getElementById('bidModal')) return;
+    const tpl = document.createElement('div');
+    tpl.innerHTML = `
+      <div id="bidModal" class="modal"><div class="panel">
+        <div class="title">Submit a Bid</div>
+        <div id="bidSummary" class="meta" style="margin-bottom:8px"></div>
+        <label>Offer Amount (USD)
+          <input id="bidAmount" type="number" inputmode="numeric" class="input" min="1" step="1" placeholder="e.g. 1299">
+        </label>
+        <div style="height:8px"></div>
+        <label>Notes (optional)
+          <input id="bidNotes" class="input" placeholder="Any extra details…">
+        </label>
+        <div id="bidError" class="error"></div>
+        <div class="panel-actions">
+          <button class="btn secondary" type="button" id="bidCancel">Cancel</button>
+          <button class="btn" type="button" id="bidSubmit">Submit Bid</button>
+        </div>
+      </div></div>`;
+    document.body.appendChild(tpl.firstElementChild);
+  }
+  ensureBidModal();
+
+  // When Bid is clicked, capture the *card DOM snapshot* into the modal (JSON in dataset)
+  document.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button, a');
+    if (!btn || !isBidButton(btn)) return;
+    e.preventDefault(); e.stopPropagation();
+
+    const card = btn.closest('.load-card, .card');
+    const payload = payloadFromCard(card);
+    if (!payload){ alert('Load not found.'); return; }
+
+    const modal = document.getElementById('bidModal');
+    modal.dataset.payload = JSON.stringify(payload);  // <- bulletproof across re-renders
+    // Fill summary
+    const sum = document.getElementById('bidSummary');
+    if (sum){
+      const milesTxt = (payload.miles!=null ? new Intl.NumberFormat().format(payload.miles) : '');
+      sum.innerHTML = `<strong>Route:</strong> ${payload.route_from} → ${payload.route_to}
+        &nbsp;&nbsp;<strong>Item:</strong> ${payload.item}
+        &nbsp;&nbsp;<strong>Miles:</strong> ${milesTxt}
+        &nbsp;&nbsp;<strong>First Available:</strong> ${payload.date||''}`;
+    }
+    const err = document.getElementById('bidError'); if (err) err.textContent = '';
+    const amt = document.getElementById('bidAmount'); if (amt) amt.value = '';
+    const nto = document.getElementById('bidNotes');  if (nto) nto.value = '';
+    modal.classList.add('open');
+  });
+
+  // Modal buttons
+  document.addEventListener('click', (e)=>{
+    if (e.target.id === 'bidCancel'){ document.getElementById('bidModal')?.classList.remove('open'); }
+  });
+
+  // Submit using the payload we captured into the modal (no dependence on CARD_MAP or globals)
+  document.addEventListener('click', async (e)=>{
+    if (e.target.id !== 'bidSubmit') return;
+    const err = document.getElementById('bidError');
+    const raw = (document.getElementById('bidAmount')?.value||'').trim();
+    const amount = Number(raw);
+    if (!raw || !Number.isFinite(amount) || amount <= 0){
+      if (err) err.textContent = 'Please enter a valid dollar amount.'; return;
+    }
+
+    const modal = document.getElementById('bidModal');
+    let payload = null;
+    try { payload = JSON.parse(modal?.dataset?.payload || 'null'); } catch(_){}
+    if (!payload){
+      if (err) err.textContent = 'Load not found.'; return;
+    }
+
+    // If Supabase isn’t available, just close and confirm (UI path proof)
+    if (!window.sb){
+      modal.classList.remove('open');
+      alert('Bid submitted (UI only). Configure Supabase to save bids.');
+      return;
+    }
+
+    try{
+      const { data } = await window.sb.auth.getUser();
+      const uid = data?.user?.id;
+      if (!uid){ document.getElementById('authModal')?.classList.add('open'); return; }
+
+      const row = {
+        load_number: payload.load_number || payload.key,
+        load_id:     payload.load_id || payload.key,
+        route_from:  payload.route_from || '',
+        route_to:    payload.route_to || '',
+        item:        payload.item || 'Item',
+        miles:       (payload.miles!=null ? Number(payload.miles) : null),
+        price_offer: Math.round(amount),
+        notes:       (document.getElementById('bidNotes')?.value||'').trim() || null,
+        auth_user_id: uid,
+        status: 'SUBMITTED',
+        created_at: new Date().toISOString()
+      };
+
+      const { error } = await window.sb.from('bids').insert(row);
+      if (error) throw error;
+
+      modal.classList.remove('open');
+      alert('Bid submitted! You can review it in Admin.');
+    }catch(ex){
+      console.error('Bid insert failed:', ex);
+      if (err) err.textContent = ex.message || 'Failed to submit bid.';
+    }
+  });
+
+  // Prevent accidental form submissions that scroll the page (mobile)
+  document.addEventListener('submit', (e)=>{ e.preventDefault(); }, true);
+})();
