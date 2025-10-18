@@ -5,9 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Submit Bid — American AI Marketplace</title>
   <link rel="stylesheet" href="/assets/styles.css">
-  <style>
-    .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
-  </style>
+
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script>
+    window.SUPABASE_URL = "https://xntxctjjtfjeznircuas.supabase.co";
+    window.SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhudHhjdGpqdGZqZXpuaXJjdWFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA2ODkxNTAsImV4cCI6MjA3NjI2NTE1MH0.KeP_BvUDX1nde1iw95sv0ETtcseVEjDuR7gcYHPmsVk";
+  </script>
+
+  <script defer src="/assets/bid.js"></script>
 </head>
 <body>
   <div class="nav">
@@ -39,78 +44,5 @@
       </div>
     </div>
   </div>
-
-  <script>
-    // -------- helpers (no external deps) --------
-    function b64uDecode(s){
-      try{
-        s = s.replace(/-/g,'+').replace(/_/g,'/');
-        const pad = s.length % 4; if (pad) s += '='.repeat(4-pad);
-        return decodeURIComponent(escape(atob(s)));
-      }catch(e){ return ''; }
-    }
-    function b64uEncode(s){
-      return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-    }
-    function fmt(n){ return new Intl.NumberFormat().format(n); }
-
-    // -------- read load payload from ?p= --------
-    let load = {};
-    (function(){
-      const url = new URL(location.href);
-      const raw = url.searchParams.get('p') || '';
-      try { load = JSON.parse(b64uDecode(raw) || '{}'); } catch(e){ load = {}; }
-    })();
-
-    // -------- render summary --------
-    (function(){
-      const box = document.getElementById('bidSummary');
-      if (!box) return;
-      if (!load || (!load.load_number && !load.route_from && !load.route_to)){
-        box.innerHTML = `<div class="error">Invalid or missing load. Return to the <a href="/index.html#loads">loads list</a>.</div>`;
-        document.getElementById('submitBidBtn')?.setAttribute('disabled','disabled');
-        return;
-      }
-      const priceLine = (load.price && Number(load.price)>0) ? `<div class="meta"><strong>Price:</strong> $${fmt(Number(load.price))}</div>` : '';
-      box.innerHTML = `
-        <div class="meta"><strong>Route:</strong> ${(load.route_from||'').toString()} → ${(load.route_to||'').toString()}</div>
-        <div class="meta"><strong>Item:</strong> ${(load.item||'Item').toString()}</div>
-        <div class="meta"><strong>Miles:</strong> ${load.miles!=null ? fmt(Number(load.miles)) : ''}</div>
-        <div class="meta"><strong>First Available Date:</strong> ${(load.date||load.available||'').toString()}</div>
-        ${priceLine}
-      `;
-    })();
-
-    // -------- submit -> bounce back to index with bid= --------
-    document.getElementById('submitBidBtn')?.addEventListener('click', () => {
-      const err = document.getElementById('bidError');
-      const amountRaw = (document.getElementById('bidAmount')?.value || '').trim();
-      const notesRaw  = (document.getElementById('bidNotes')?.value || '').trim();
-
-      const amount = Number(amountRaw);
-      if (!amountRaw || !Number.isFinite(amount) || amount <= 0){
-        if (err) err.textContent = 'Please enter a valid dollar amount.';
-        return;
-      }
-
-      const envelope = {
-        payload: {
-          load_number: load.load_number || load.load_id,
-          load_id:     load.load_id || load.load_number,
-          route_from:  load.route_from || '',
-          route_to:    load.route_to || '',
-          item:        load.item || 'Item',
-          miles:       (load.miles != null ? Number(load.miles) : null),
-          date:        load.date || load.available || ''
-        },
-        offer: Math.round(amount),
-        notes: notesRaw || null
-      };
-
-      const encoded = b64uEncode(JSON.stringify(envelope));
-      // Use query so /index.html can read it even after reloads
-      window.location.href = '/index.html?bid=' + encoded + '#loads';
-    });
-  </script>
 </body>
 </html>
