@@ -9,12 +9,10 @@
   <!-- Supabase MUST load BEFORE your app.js -->
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script>
-    /* Replace the KEY with your project's ANON public key (NOT service role) */
     window.SUPABASE_URL = "https://xntxctjjtfjeznircuas.supabase.co";
-    window.SUPABASE_KEY = "YOUR_ANON_PUBLIC_KEY_HERE";
+    window.SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhudHhjdGpqdGZqZXpuaXJjdWFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA2ODkxNTAsImV4cCI6MjA3NjI2NTE1MH0.KeP_BvUDX1nde1iw95sv0ETtcseVEjDuR7gcYHPmsVk";
   </script>
 
-  <!-- Your app code uses window.SUPABASE_URL/KEY if present -->
   <script defer src="/assets/app.js"></script>
 </head>
 <body>
@@ -22,7 +20,6 @@
     <div><a href="/index.html">American AI Marketplace</a></div>
     <div>
       <a href="/index.html">Home</a>
-      <!-- You can keep/remove loads.html link if you want a separate page -->
       <a href="/loads.html">Find Loads</a>
       <a href="/register.html">Register</a>
       <a href="/my-bids.html" id="myBidsLink" title="Feature coming soon">My Bids</a>
@@ -47,7 +44,6 @@
         <option>Vehicle</option><option>Boat</option><option>Motorcycle</option>
         <option>Household</option><option>LTL</option><option>Pets</option><option>Heavy Equipment</option>
       </select>
-      <!-- Sort/pagination UI is injected by app.js if present -->
     </div>
     <div id="grid" class="grid"></div>
   </div>
@@ -59,7 +55,7 @@
   <!-- View Modal -->
   <div id="viewModal" class="modal"><div class="panel"><div id="viewContent"></div></div></div>
 
-  <!-- Auth Modal (carrier sign-in) -->
+  <!-- Auth Modal -->
   <div id="authModal" class="modal"><div class="panel">
     <div class="title">Sign in</div>
     <label>Email <input id="authEmail" type="email" class="input" placeholder="name@example.com"></label>
@@ -72,7 +68,7 @@
     </div>
   </div></div>
 
-  <!-- Admin Gate Modal (for /admin/) -->
+  <!-- Admin Gate Modal -->
   <div id="gateModal" class="modal"><div class="panel">
     <div class="title">Admin Access</div>
     <label>Username <input id="gateUser" class="input" placeholder="Enter a username"></label>
