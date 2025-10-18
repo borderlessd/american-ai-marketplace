@@ -487,3 +487,149 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('keydown', e=>{ if (e.key==='Escape'){ document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open')); }});
   })();
 })();
+
+/* ===============================
+   ONE-BLOCK BID INDEX FIX (append-only)
+   - Capture the last list your UI actually rendered
+   - Use that list for Bid/Submit so indexes match
+   - Minimal diagnostics to console (once)
+   =============================== */
+(function bidIndexFix(){
+  // 1) Capture the last list passed to render(list)
+  if (typeof window.render === 'function' && !window.render.__aim_capture){
+    const __origRender = window.render;
+    window.render = function(list){
+      try { window.__aimLastList = Array.isArray(list) ? list.slice() : []; }
+      catch(_) { window.__aimLastList = []; }
+      return __origRender.apply(this, arguments);
+    };
+    window.render.__aim_capture = true;
+  } else {
+    // Ensure the holder exists even if render isn't patched yet
+    window.__aimLastList = window.__aimLastList || [];
+  }
+
+  // Helpers (local; won’t stomp your globals)
+  const pick = (...xs)=>{ for(const x of xs){ if(x!=null && x!=='') return x; } return ''; };
+  const fromCity = (l)=> (typeof window.fromCity==='function' ? window.fromCity(l)
+                    : pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from));
+  const toCity   = (l)=> (typeof window.toCity==='function' ? window.toCity(l)
+                    : pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to));
+  const itemName = (l)=> (typeof window.itemName==='function' ? window.itemName(l)
+                    : pick(l.item,l.vehicle,l.commodity,'Item'));
+  const dateStr  = (l)=> { const r = pick(l.date,l.available,l.availableDate,l.pickup_date,l.pickupDate,l.readyDate,l.date_available); return r?String(r):''; };
+  const safeMiles= (l)=> { const m=l.miles; const n=(typeof m==='string')?Number(m.replace(/,/g,'')):Number(m); return Number.isFinite(n)?n:null; };
+  const idsFor   = (l)=> {
+    const ln = l.load_number || l.loadNo || l.loadNum;
+    const id = l.id || l.uuid || l.key;
+    let ident = ln || id;
+    if (!ident){
+      const f = fromCity(l) || 'FROM', t = toCity(l) || 'TO', d = dateStr(l) || new Date().toISOString().slice(0,10);
+      ident = `${f}-${t}-${d}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
+    }
+    return { load_number: String(ident), load_id: String(id || ident) };
+  };
+
+  // 2) Safe getter uses the EXACT rendered list first
+  function getLoadByRenderedIndex(index){
+    const list = Array.isArray(window.__aimLastList) ? window.__aimLastList : [];
+    if (index!=null && index>=0 && index<list.length) return list[index];
+    // fallback (shouldn’t be used, but harmless)
+    const all = Array.isArray(window.LOADS) ? window.LOADS : [];
+    if (index!=null && index>=0 && index<all.length) return all[index];
+    return null;
+  }
+
+  // 3) Patch bid() so it stores the filtered index and only opens sign-in if needed
+  (function patchBid(){
+    const wrapped = async function(index){
+      window.__currentBidIndex = Number(index);
+      try{
+        const s = window.sb;
+        if (!s?.auth){ window.openAuth?.(); return; }
+        const { data } = await s.auth.getUser();
+        if (!data?.user?.id){ window.openAuth?.(); return; }
+        (window.openBidModal || (m=>document.getElementById('bidModal')?.classList.add('open')))();
+      }catch(_){ window.openAuth?.(); }
+    };
+    if (typeof window.bid !== 'function'){
+      window.bid = wrapped;
+    } else if (!window.bid.__aim_wrapped){
+      const orig = window.bid;
+      window.bid = function(i){ window.__currentBidIndex = Number(i); return orig.apply(this, arguments); };
+      window.bid.__aim_wrapped = true;
+    }
+  })();
+
+  // 4) Patch submitBid() to pull from the rendered list (and to satisfy DB columns)
+  (function patchSubmit(){
+    async function fixedSubmit(){
+      const err = document.getElementById('bidError');
+      const amtEl = document.getElementById('bidAmount');
+      const notesEl = document.getElementById('bidNotes');
+
+      const raw = (amtEl?.value || '').trim();
+      const amount = Number(raw);
+      if (!raw || !Number.isFinite(amount) || amount <= 0){
+        if (err) err.textContent = 'Please enter a valid dollar amount.'; 
+        return;
+      }
+
+      const s = window.sb;
+      if (!s?.auth){ window.openAuth?.(); return; }
+      const { data: userData } = await s.auth.getUser();
+      const uid = userData?.user?.id;
+      if (!uid){ window.openAuth?.(); return; }
+
+      const idx = (typeof window.__currentBidIndex === 'number') ? window.__currentBidIndex : null;
+      const l = getLoadByRenderedIndex(idx);
+
+      if (!l){
+        if (err) err.textContent = 'Load not found.'; 
+        // One-time diagnostic to help us see what the page thinks:
+        if (!window.__aimLoggedOnce){
+          console.warn('[AIM] Bid submit: no load at index', idx, 'lastListLen=', (window.__aimLastList||[]).length);
+          window.__aimLoggedOnce = true;
+        }
+        return;
+      }
+
+      const ids = idsFor(l);
+      const payload = {
+        load_number: ids.load_number,      // NOT NULL constraint? satisfied.
+        load_id: ids.load_id,
+        route_from: fromCity(l),
+        route_to: toCity(l),
+        item: itemName(l),
+        miles: safeMiles(l),
+        price_offer: Math.round(amount),
+        notes: (notesEl?.value || '').trim() || null,
+        auth_user_id: uid,
+        status: 'SUBMITTED',
+        created_at: new Date().toISOString()
+      };
+
+      try{
+        const { error } = await s.from('bids').insert(payload);
+        if (error) throw error;
+        (window.closeBidModal || (m=>document.getElementById('bidModal')?.classList.remove('open')))();
+        alert('Bid submitted! You can review it in Admin.');
+      }catch(e){
+        console.error('Bid insert failed:', e);
+        if (err) err.textContent = e.message || 'Failed to submit bid.';
+      }
+    }
+
+    if (typeof window.submitBid !== 'function'){
+      window.submitBid = fixedSubmit;
+    } else if (!window.submitBid.__aim_wrapped){
+      const orig = window.submitBid;
+      window.submitBid = async function(){
+        // Try original first; if it fails with missing load, fall back
+        try { return await orig.apply(this, arguments); }
+        catch (e) { return await fixedSubmit(); }
+      };
+      window.submitBid.__aim_wrapped = true;
+    }
+  })();
+})();
