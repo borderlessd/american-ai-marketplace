@@ -10,27 +10,39 @@ window.sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
  ***********************/
 const $  = (q, el=document) => el.querySelector(q);
 const $$ = (q, el=document) => Array.from(el.querySelectorAll(q));
-function fmtNum(n){ return new Intl.NumberFormat().format(Number(n||0)); }
+
+function fmtNum(n){ const v = Number(n||0); return isFinite(v) ? new Intl.NumberFormat().format(v) : '0'; }
 function fmtUSD(n){
   const v = Number(n);
   if (!isFinite(v)) return '';
-  return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(v);
+  return new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', maximumFractionDigits:0 }).format(v);
 }
-function isBlankOrTBD(v){ if(v===null||v===undefined) return true; const s=String(v).trim().toLowerCase(); return !s || s==='tbd' || s==='na' || s==='n/a'; }
+function isBlankOrTBD(v){
+  if (v === null || v === undefined) return true;
+  const s = String(v).trim().toLowerCase();
+  return !s || s === 'tbd' || s === 'na' || s === 'n/a';
+}
 
 /***********************
- *   Loads             *
+ *   Loads state       *
  ***********************/
 let LOADS = [];
 
-// normalize arbitrary keys from Sheets/AppScript -> our internal shape
+/**
+ * Normalize arbitrary keys from the Google Sheet / Apps Script feed
+ * into a stable internal shape the UI expects.
+ */
 function normalizeLoad(raw){
   const from_city = raw.from_city || raw.fromCity || raw.originCity || raw.origin || raw.pickup_city || raw.pickupCity;
   const to_city   = raw.to_city   || raw.toCity   || raw.destinationCity || raw.destination || raw.dropoff_city || raw.dropoffCity;
+
   const item      = raw.item || raw.vehicle || raw.commodity || 'Item';
   const miles     = Number(raw.miles ?? raw.distance ?? 0) || 0;
 
-  const available = raw.available || raw.availableDate || raw.dateAvailable || raw.date_available || raw.pickupDate || raw.pickup_date || raw.readyDate || raw.delivery_date || raw.date;
+  // choose a sensible “available” date field
+  const available = raw.available || raw.availableDate || raw.dateAvailable || raw.date_available ||
+                    raw.pickupDate || raw.pickup_date || raw.readyDate || raw.delivery_date || raw.date;
+
   const load_number = raw.load_number || raw.id || raw.ref || '';
 
   // price may be string like "1299" or "TBD"
@@ -40,27 +52,29 @@ function normalizeLoad(raw){
   const status = String((raw.status || 'ACTIVE')).toUpperCase();
 
   return {
-    // canonical
     load_number,
     from_city: from_city || '',
     to_city: to_city || '',
     item,
     miles,
     available: available || '',
-    price,            // '' if blank/TBD, number or string otherwise
+    price,            // '' if blank/TBD, else number or string
     status,
     notes: raw.notes || '',
-    // keep originals for debugging
-    _raw: raw
+    _raw: raw         // keep original for debugging/compat
   };
 }
 
+/***********************
+ *   Data loading      *
+ ***********************/
 async function loadData(){
   const grid = $('#grid');
   if (grid) grid.innerHTML = '<article class="card">Loading loads…</article>';
+
   try{
-    // Your netlify.toml redirects /assets/loads.json to the Apps Script URL
-    const res = await fetch('/assets/loads.json?ts=' + Date.now(), { cache:'no-store' });
+    // Netlify redirect maps this to your Apps Script endpoint
+    const res = await fetch('/assets/loads.json?ts=' + Date.now(), { cache: 'no-store' });
     const data = await res.json();
     const arr = Array.isArray(data) ? data : (data.loads || []);
     LOADS = arr.map(normalizeLoad);
@@ -71,15 +85,19 @@ async function loadData(){
   applyFilters();
 }
 
+/***********************
+ *   Rendering         *
+ ***********************/
 function render(list){
   const grid = $('#grid'); if(!grid) return;
+
   if (!list.length){
     grid.innerHTML = '<article class="card">No loads found.</article>';
     return;
   }
 
   grid.innerHTML = list.map((l, idx) => {
-    const priceLine = isBlankOrTBD(l.price) ? '' : `<div class="price" style="margin:8px 0">Price: ${typeof l.price==='number'?fmtUSD(l.price):l.price}</div>`;
+    const priceLine = isBlankOrTBD(l.price) ? '' : `<div class="price" style="margin:8px 0">Price: ${typeof l.price==='number' ? fmtUSD(l.price) : l.price}</div>`;
     return `
       <article class="card load-card">
         <div class="route">${l.from_city || '—'} → ${l.to_city || '—'} <span class="status ${l.status}">${l.status}</span></div>
@@ -99,17 +117,19 @@ function render(list){
 function applyFilters(){
   const term = ($('#q')?.value||'').toLowerCase();
   const comm = ($('#commodity')?.value||'').toLowerCase();
+
   const list = LOADS.filter(l => {
-    const hay = (l.item+' '+l.from_city+' '+l.to_city).toLowerCase();
+    const hay = (l.item + ' ' + l.from_city + ' ' + l.to_city + ' ' + (l._raw.commodity||'')).toLowerCase();
     const okQ = !term || hay.includes(term);
-    const okC = !comm || l.item.toLowerCase()===comm || (l._raw.commodity||'').toLowerCase()===comm;
+    const okC = !comm || l.item.toLowerCase() === comm || (l._raw.commodity||'').toLowerCase() === comm;
     return okQ && okC;
   });
+
   render(list);
 }
 
 /***********************
- *  View + Bid         *
+ *  View modal         *
  ***********************/
 function openView(index){
   const l = LOADS[index]; if(!l) return;
@@ -119,7 +139,7 @@ function openView(index){
     <div class="meta"><strong>Route:</strong> ${l.from_city || '—'} → ${l.to_city || '—'}</div>
     <div class="meta"><strong>Miles:</strong> ${fmtNum(l.miles)}</div>
     <div class="meta"><strong>First Available Date:</strong> ${l.available || '—'}</div>
-    ${isBlankOrTBD(l.price) ? '' : `<div class="price" style="margin:8px 0">Price: ${typeof l.price==='number'?fmtUSD(l.price):l.price}</div>`}
+    ${isBlankOrTBD(l.price) ? '' : `<div class="price" style="margin:8px 0">Price: ${typeof l.price==='number' ? fmtUSD(l.price) : l.price}</div>`}
     ${l.notes ? `<div class="meta"><strong>Notes:</strong> ${l.notes}</div>` : ''}
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       <button class="btn secondary" onclick="closeView()">Close</button>
@@ -131,36 +151,80 @@ function openView(index){
 function closeView(){ $('#viewModal').classList.remove('open'); }
 
 /***********************
- *  Auth (carriers)    *
+ *  Auth + Profiles    *
  ***********************/
+/**
+ * Create/update the user's profile & carriers rows with a company name.
+ * Reads #company if present; otherwise uses provided companyName or "New Carrier".
+ */
+async function ensureProfile(companyName){
+  try{
+    const { data: s } = await sb.auth.getSession();
+    const uid = s?.session?.user?.id;
+    if (!uid) return;
+
+    const name = (companyName || $('#company')?.value || '').trim() || 'New Carrier';
+
+    // Upsert into profiles (id is the auth user id)
+    await sb.from('profiles').upsert({ id: uid, company_name: name });
+
+    // Optional: keep carriers table in sync if you’re using it
+    await sb.from('carriers').upsert({ auth_user_id: uid, company_name: name });
+  }catch(e){
+    console.warn('ensureProfile() failed:', e);
+  }
+}
+
+/**
+ * Sign in from the modal on index/loads pages.
+ * Requires inputs with ids: #authEmail, #authPass
+ */
 async function signin(){
-  const err = $('#authError'); if (err) err.textContent='';
+  const err = $('#authError'); if (err) err.textContent = '';
   try{
     const email = $('#authEmail').value.trim();
     const password = $('#authPass').value;
+
     const { error } = await sb.auth.signInWithPassword({ email, password });
     if (error) throw error;
-    $('#authModal').classList.remove('open');
+
+    // Make sure a profile exists for this user
+    await ensureProfile();
+
+    $('#authModal')?.classList.remove('open');
     alert('Signed in.');
   }catch(e){
     if (err) err.textContent = e.message || 'Sign-in failed';
   }
 }
-function openAuth(){ $('#authModal').classList.add('open'); }
+
+/**
+ * Optional: sign-up helper if your /register.html calls it.
+ * Call: signup(email, password, companyName)
+ */
+async function signup(email, password, companyName){
+  const { error } = await sb.auth.signUp({ email, password });
+  if (error) throw error;
+  await ensureProfile(companyName);
+  return true;
+}
 
 /***********************
  *  Bidding            *
  ***********************/
 async function bid(index){
   const l = LOADS[index]; if(!l){ alert('Load not found'); return; }
+
+  // Require auth
   const { data: s } = await sb.auth.getSession();
   const uid = s?.session?.user?.id;
-  if (!uid){ openAuth(); return; }
+  if (!uid){ $('#authModal')?.classList.add('open'); return; }
 
+  // Enter bid
   const amt = prompt('Enter your bid amount (USD):');
-  if (amt===null) return;
-  const val = Number(String(amt).replace(/[^0-9.]/g,'')); // sanitize
-  if (!isFinite(val) || val<=0){ alert('Please enter a valid number'); return; }
+  if (amt === null) return;
+  const val = Number(String(amt).replace(/[^0-9.]/g, ''));
+  if (!isFinite(val) || val <= 0){ alert('Please enter a valid number'); return; }
 
   const notes = prompt('Notes (optional):') || '';
 
@@ -183,19 +247,19 @@ async function bid(index){
  *  Boot               *
  ***********************/
 document.addEventListener('DOMContentLoaded', () => {
-  // optional: reveal Admin link with ?admin=true
+  // Optional: reveal admin link when ?admin=true is present
   try{
     const url = new URL(location.href);
     const adminFlag = url.searchParams.get('admin');
     const adminLink = $('#adminLink');
-    if(adminLink) adminLink.style.display = (adminFlag==='true') ? 'inline' : 'none';
+    if (adminLink) adminLink.style.display = (adminFlag === 'true') ? 'inline' : 'none';
   }catch(e){}
 
-  // filters
+  // Filter events
   ['q','commodity'].forEach(id => {
     const el = document.getElementById(id);
-    if(!el) return;
-    el.addEventListener(el.tagName==='SELECT' ? 'change' : 'input', applyFilters);
+    if (!el) return;
+    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', applyFilters);
   });
 
   loadData();
