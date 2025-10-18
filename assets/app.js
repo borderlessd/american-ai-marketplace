@@ -633,3 +633,165 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   })();
 })();
+
+/* ===============================
+   STABLE BID PATCH (append-only)
+   - Use DOM order to map the clicked card -> list item
+   - Works even after filters/sort/pagination
+   - No HTML edits required
+   =============================== */
+(function stableBidPatch(){
+  // 1) Capture last list passed to render(list)
+  if (typeof window.render === 'function' && !window.render.__aim_capture) {
+    const orig = window.render;
+    window.render = function(list){
+      try { window.__aimLastList = Array.isArray(list) ? list.slice() : []; }
+      catch(_) { window.__aimLastList = []; }
+      const out = orig.apply(this, arguments);
+
+      // After render: tag cards with a stable ID (for safety) based on the list item
+      const cards = Array.from(document.querySelectorAll('#grid .card, #grid .load-card'));
+      cards.forEach((el, i) => {
+        const l = window.__aimLastList?.[i];
+        if (!l) return;
+        const id = (l.load_number || l.id || `${(l.from_city||l.origin||'FROM')}-${(l.to_city||l.destination||'TO')}-${(l.available||l.pickup_date||l.date||'')}`).toString();
+        el.dataset.aimId = id;
+      });
+
+      return out;
+    };
+    window.render.__aim_capture = true;
+  } else {
+    window.__aimLastList = window.__aimLastList || [];
+  }
+
+  // Helpers
+  const pick = (...xs)=>{ for (const x of xs){ if (x!=null && x!=='') return x; } return ''; };
+  const fromCity = l => pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from);
+  const toCity   = l => pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to);
+  const itemName = l => pick(l.item,l.vehicle,l.commodity,'Item');
+  const dateStr  = l => { const r = pick(l.date,l.available,l.availableDate,l.pickup_date,l.pickupDate,l.readyDate,l.date_available); return r?String(r):''; };
+  const safeMiles= l => { const m=l.miles; const n=(typeof m==='string')?Number(m.replace(/,/g,'')):Number(m); return Number.isFinite(n)?n:null; };
+  const idsFor   = l => {
+    const ln = l.load_number || l.loadNo || l.loadNum;
+    const id = l.id || l.uuid || l.key;
+    let ident = ln || id;
+    if (!ident) {
+      const f = fromCity(l) || 'FROM', t = toCity(l) || 'TO', d = dateStr(l) || new Date().toISOString().slice(0,10);
+      ident = `${f}-${t}-${d}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
+    }
+    return { load_number: String(ident), load_id: String(id || ident) };
+  };
+
+  // 2) Compute index from DOM, not from inline onclick numbers
+  function indexFromCard(cardEl){
+    if (!cardEl) return null;
+    const parent = cardEl.parentNode;
+    if (!parent) return null;
+    const siblings = Array.from(parent.children);
+    const idx = siblings.indexOf(cardEl);
+    return (idx >= 0) ? idx : null;
+  }
+
+  // 3) Delegate clicks on Bid buttons: set current index based on DOM
+  document.addEventListener('click', async (e) => {
+    const el = e.target.closest('button, a');
+    if (!el) return;
+
+    // Treat any button with text "Bid" as bid trigger
+    const isBid = /(^|\s)btn(\s|$)/.test(el.className || '') && /bid/i.test(el.textContent || '');
+    if (!isBid) return;
+
+    const card = el.closest('.card, .load-card');
+    const idx = indexFromCard(card);
+    if (idx == null) return;
+
+    // store index into the last rendered list
+    window.__currentBidIndex = idx;
+
+    // If you already defined window.bid, let it run (it will now have the correct index)
+    if (typeof window.bid === 'function') {
+      return; // your existing handler will run from the inline onclick or other wiring
+    }
+
+    // Minimal fallback: require auth then open modal
+    try{
+      const s = window.sb;
+      if (!s?.auth){ window.openAuth?.(); return; }
+      const { data } = await s.auth.getUser();
+      if (!data?.user?.id){ window.openAuth?.(); return; }
+      (window.openBidModal || (m=>document.getElementById('bidModal')?.classList.add('open')))();
+    }catch(_){ window.openAuth?.(); }
+  }, true);
+
+  // 4) Patch/Provide submitBid to use __aimLastList[__currentBidIndex]
+  (function ensureSubmitBid(){
+    async function fixedSubmit(){
+      const err = document.getElementById('bidError');
+      const amtEl = document.getElementById('bidAmount');
+      const notesEl = document.getElementById('bidNotes');
+
+      const raw = (amtEl?.value || '').trim();
+      const amount = Number(raw);
+      if (!raw || !Number.isFinite(amount) || amount <= 0){
+        if (err) err.textContent = 'Please enter a valid dollar amount.'; 
+        return;
+      }
+
+      const s = window.sb;
+      if (!s?.auth){ window.openAuth?.(); return; }
+      const { data: userData } = await s.auth.getUser();
+      const uid = userData?.user?.id;
+      if (!uid){ window.openAuth?.(); return; }
+
+      const idx = (typeof window.__currentBidIndex === 'number') ? window.__currentBidIndex : null;
+      const list = Array.isArray(window.__aimLastList) ? window.__aimLastList : [];
+      const l = (idx!=null && idx >= 0) ? list[idx] : null;
+
+      if (!l){
+        if (err) err.textContent = 'Load not found.';
+        if (!window.__aimLoggedOnce){
+          console.warn('[AIM] No load at DOM index', idx, 'listLen=', list.length);
+          window.__aimLoggedOnce = true;
+        }
+        return;
+      }
+
+      const ids = idsFor(l);
+      const payload = {
+        load_number: ids.load_number,
+        load_id: ids.load_id,
+        route_from: fromCity(l),
+        route_to: toCity(l),
+        item: itemName(l),
+        miles: safeMiles(l),
+        price_offer: Math.round(amount),
+        notes: (notesEl?.value || '').trim() || null,
+        auth_user_id: uid,
+        status: 'SUBMITTED',
+        created_at: new Date().toISOString()
+      };
+
+      try{
+        const { error } = await s.from('bids').insert(payload);
+        if (error) throw error;
+        (window.closeBidModal || (m=>document.getElementById('bidModal')?.classList.remove('open')))();
+        alert('Bid submitted! You can review it in Admin.');
+      }catch(e){
+        console.error('Bid insert failed:', e);
+        if (err) err.textContent = e.message || 'Failed to submit bid.';
+      }
+    }
+
+    if (typeof window.submitBid !== 'function'){
+      window.submitBid = fixedSubmit;
+    } else if (!window.submitBid.__aim_wrapped){
+      const orig = window.submitBid;
+      window.submitBid = async function(){
+        try { return await orig.apply(this, arguments); }
+        catch (_) { return await fixedSubmit(); }
+      };
+      window.submitBid.__aim_wrapped = true;
+    }
+  })();
+})();
