@@ -28,3 +28,24 @@ html,body { margin:0; font-family:Inter,system-ui,Arial,sans-serif; background:v
 .panel .title { color:var(--navy); font-weight:900; margin-bottom:6px; font-size:20px }
 .error { color:#b91c1c; font-size:12px; margin-top:6px }
 .footer-note { font-size:12px; color:#6b7280 }
+
+/* ==== Dark mode base ==== */
+body.dark { background:#0f1115; color:#e7eaf0; }
+body.dark .nav { background:#141823; border-bottom:1px solid #222736; }
+body.dark .nav a { color:#e7eaf0; }
+body.dark .hero { background:#121621; color:#e7eaf0; }
+body.dark .badge { background:#1b2132; color:#e7eaf0; border:1px solid #2a3146; }
+
+body.dark .panel,
+body.dark .card { background:#151a27; border:1px solid #242b3d; color:#e7eaf0; }
+
+body.dark .input { background:#0f1220; color:#e7eaf0; border:1px solid #2a3146; }
+body.dark .btn { background:#2a3146; color:#e7eaf0; border:1px solid #38405a; }
+body.dark .btn.secondary { background:transparent; border-color:#38405a; color:#e7eaf0; }
+
+body.dark .status { background:#22273a; color:#cfd6ff; }
+body.dark .footer { background:#121621; color:#99a3c7; border-top:1px solid #222736; }
+
+/* Optional: table/admin styles if reused on main */
+body.dark table { color:#e7eaf0; }
+body.dark th, body.dark td { border-bottom:1px solid #2a3146; }
