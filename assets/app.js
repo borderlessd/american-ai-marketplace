@@ -379,3 +379,209 @@ document.addEventListener('DOMContentLoaded', () => {
     if (href === '' || href === '#'){ e.preventDefault(); }
   }, true);
 });
+
+/* ======================================================================
+   >>> BID KILL-SWITCH (append-only) <<<
+   Makes every Bid button reliable, even after sort/pagination.
+   - Cancels anchor jumps (# / empty href)
+   - Stamps/repairs payloads on ALL cards via MutationObserver
+   - Opens modal with that exact payload
+   - submitBid reads only the modal snapshot
+   ====================================================================== */
+(function AIM_BID_KILLSWITCH(){
+  // ---------- tiny helpers ----------
+  const $  = (q, r=document)=>r.querySelector(q);
+  const $$ = (q, r=document)=>Array.from(r.querySelectorAll(q));
+  const pick = (...xs)=>{ for(const x of xs){ if(x!=null && x!=='') return x; } return ''; };
+  const fromCity = l => pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from);
+  const toCity   = l => pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to);
+  const dateStr  = l => { const r = pick(l.date,l.available,l.availableDate,l.pickup_date,l.pickupDate,l.readyDate,l.date_available); return r?String(r):''; };
+  const makeKey  = l => (l?.load_number||l?.id||l?.uuid||l?.key) ||
+                        `${fromCity(l)||'FROM'}-${toCity(l)||'TO'}-${dateStr(l)||''}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
+
+  // Build a payload by *reading the card DOM*, even if data-load is missing.
+  function payloadFromCard(card){
+    if (!card) return null;
+    const routeTxt = (card.querySelector('.route')?.textContent||'').trim();
+    let rf='', rt='';
+    if (routeTxt.includes('→')){
+      const [f,t] = routeTxt.split('→');
+      rf = (f||'').trim();
+      rt = (t||'').replace(/\s+(OPEN|ACTIVE|CLOSED|PENDING).*/i,'').trim();
+    }
+    const metas = $$('.meta', card).map(x=>x.textContent.trim());
+    const item  = (metas.find(t=>/^item:/i.test(t))||'').replace(/^item:\s*/i,'').trim() || 'Item';
+    const miles = (metas.find(t=>/^miles:/i.test(t))||'').replace(/[^0-9]/g,'');
+    const avail = (metas.find(t=>/^first available date:/i.test(t))||'').replace(/^first available date:\s*/i,'').trim();
+
+    // Prefer an id already present on the element
+    const existing = card.dataset.aimId || card.getAttribute('data-aim-id') || null;
+    const idGuess  = `${rf}-${rt}-${avail}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
+    const load_number = existing || idGuess;
+    return {
+      __key: load_number,
+      load_number,
+      load_id: load_number,
+      route_from: rf,
+      route_to: rt,
+      item,
+      miles: miles ? Number(miles) : null,
+      available: avail
+    };
+  }
+
+  // Prevent any anchor jump (this is the piece that yanks you to top).
+  if (!document.__aimKillAnchors){
+    document.__aimKillAnchors = true;
+    const kill = ev=>{
+      const a = ev.target.closest('a');
+      if (!a) return;
+      const href = a.getAttribute('href')||'';
+      if (href === '' || href === '#' || href.startsWith('#')){
+        ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation();
+      }
+    };
+    ['pointerdown','touchstart','click'].forEach(t=>document.addEventListener(t, kill, true));
+  }
+
+  // Ensure bid modal + hidden store exist
+  function ensureModalStore(){
+    let modal = $('#bidModal');
+    if (!modal){
+      const shell = document.createElement('div');
+      shell.innerHTML = `
+        <div id="bidModal" class="modal"><div class="panel">
+          <div class="title">Submit a Bid</div>
+          <label>Offer Amount (USD)<input id="bidAmount" type="number" class="input" min="1" step="1" placeholder="e.g. 1299"></label>
+          <div style="height:8px"></div>
+          <label>Notes (optional)<input id="bidNotes" class="input" placeholder="Any extra details…"></label>
+          <div id="bidError" class="error"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+            <button class="btn secondary" type="button" onclick="(window.closeBidModal||function(){document.getElementById('bidModal')?.classList.remove('open');})()">Cancel</button>
+            <button class="btn" type="button" onclick="window.submitBid && window.submitBid()">Submit Bid</button>
+          </div>
+        </div></div>`;
+      document.body.appendChild(shell.firstElementChild);
+      modal = $('#bidModal');
+    }
+    if (!$('#bidPayloadStore', modal)){
+      const ta = document.createElement('textarea');
+      ta.id = 'bidPayloadStore';
+      ta.style.display = 'none';
+      modal.appendChild(ta);
+    }
+  }
+  ensureModalStore();
+
+  // Turn any “Bid” thing (button or link) into a reliable trigger.
+  function wireOneBid(btn){
+    if (!btn || btn.__aimWired) return;
+    btn.__aimWired = true;
+
+    // Make it a real button to avoid form/anchor defaults
+    if (btn.tagName === 'A'){ btn.setAttribute('role','button'); btn.removeAttribute('href'); }
+    btn.setAttribute('type','button');
+
+    btn.addEventListener('click', async (e)=>{
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+
+      // 1) Find the containing card and derive payload (or use existing data-load)
+      const card = btn.closest('.load-card, .card');
+      if (!card) return;
+      let payload = null;
+      const attr = btn.getAttribute('data-load');
+      if (attr){ try { payload = JSON.parse(attr); } catch(_){} }
+      if (!payload) payload = payloadFromCard(card);
+      if (!payload){ alert('Could not read load info from card.'); return; }
+
+      // 2) Auth gate
+      try{
+        if (!window.sb?.auth){ (window.openAuth||(()=>{}))(); return; }
+        const { data } = await sb.auth.getUser();
+        if (!data?.user){ (window.openAuth||(()=>{}))(); return; }
+      }catch(_){ (window.openAuth||(()=>{}))(); return; }
+
+      // 3) Stash payload into the modal store and open the modal
+      const store = document.getElementById('bidPayloadStore');
+      if (store) store.value = JSON.stringify(payload);
+      const modal = document.getElementById('bidModal');
+      if (modal) modal.classList.add('open');
+    }, true);
+  }
+
+  // Scan the grid for all potential Bid triggers and repair them.
+  function repairAllBids(){
+    const grid = document.getElementById('grid') || document;
+    // Any .btn that visually says "Bid", and any element with [data-bid]
+    const candidates = $$('.btn, [data-bid]', grid).filter(el=>{
+      const t = (el.textContent||'').trim().toLowerCase();
+      return /\bbid\b/.test(t) || el.hasAttribute('data-bid');
+    });
+    candidates.forEach(btn=>{
+      // If render didn’t set data-load, stamp from the card now
+      const card = btn.closest('.load-card, .card');
+      if (card && !btn.getAttribute('data-load')) {
+        const p = payloadFromCard(card);
+        if (p) btn.setAttribute('data-load', JSON.stringify(p).replace(/'/g,"&apos;"));
+      }
+      wireOneBid(btn);
+    });
+  }
+
+  // Observe changes (sorting/pagination reorders nodes). Re-repair quickly.
+  const mo = new MutationObserver(()=>{ repairAllBids(); });
+  mo.observe(document.body, { childList:true, subtree:true });
+
+  // Run once now and a couple more times in case of late renders
+  const boot = ()=>{ ensureModalStore(); repairAllBids(); };
+  if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+  setTimeout(boot, 300);
+  setTimeout(boot, 900);
+
+  // Override submitBid to ONLY read the modal snapshot.
+  (function hardenSubmit(){
+    window.submitBid = async function(){
+      const err  = document.getElementById('bidError');
+      const amt  = (document.getElementById('bidAmount')?.value||'').trim();
+      const notes= (document.getElementById('bidNotes')?.value||'').trim();
+      const store= document.getElementById('bidPayloadStore');
+
+      const amount = Number(amt);
+      if (!amt || !Number.isFinite(amount) || amount<=0){ if (err) err.textContent='Please enter a valid dollar amount.'; return; }
+
+      let uid = null;
+      try{ const { data } = await window.sb.auth.getUser(); uid = data?.user?.id||null; }catch(_){}
+      if (!uid){ (window.openAuth||(()=>{}))(); return; }
+
+      let snap = null;
+      if (store && store.value){ try { snap = JSON.parse(store.value); } catch(_){} }
+      if (!snap){ if (err) err.textContent='Load not found.'; return; }
+
+      const payload = {
+        load_number: snap.load_number || snap.load_id,
+        load_id:     snap.load_id || snap.load_number,
+        route_from:  snap.route_from || '',
+        route_to:    snap.route_to || '',
+        item:        snap.item || 'Item',
+        miles:       (typeof snap.miles==='number' ? snap.miles : null),
+        price_offer: Math.round(amount),
+        notes:       notes || null,
+        auth_user_id: uid,
+        status:      'SUBMITTED',
+        created_at:  new Date().toISOString()
+      };
+
+      try{
+        const { error } = await window.sb.from('bids').insert(payload);
+        if (error) throw error;
+        document.getElementById('bidModal')?.classList.remove('open');
+        if (store) store.value = '';
+        alert('Bid submitted! You can review it in Admin.');
+      }catch(e){
+        console.error('Bid insert failed:', e);
+        if (err) err.textContent = e.message || 'Failed to submit bid.';
+      }
+    };
+  })();
+})();
