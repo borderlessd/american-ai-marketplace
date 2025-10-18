@@ -795,3 +795,156 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   })();
 })();
+
+/* ===============================
+   FINAL "LOAD NOT FOUND" FIX (append-only)
+   - Use a stable key per card (dataset.aimId)
+   - Works regardless of sorting, filtering, or pagination
+   =============================== */
+(function bidKeyFix(){
+  // Helper bits
+  const pick = (...xs)=>{ for (const x of xs){ if (x!=null && x!=='') return x; } return ''; };
+  const fromCity = l => pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from);
+  const toCity   = l => pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to);
+  const dateStr  = l => { const r = pick(l.date,l.available,l.availableDate,l.pickup_date,l.pickupDate,l.readyDate,l.date_available); return r?String(r):''; };
+  const makeKey  = l => {
+    // Preferred: existing identifiers
+    const k = l.load_number || l.id || l.uuid || l.key;
+    if (k) return String(k);
+    // Fallback: deterministic composite key
+    return `${fromCity(l)||'FROM'}-${toCity(l)||'TO'}-${dateStr(l)||''}`
+      .replace(/\s+/g,'_').toUpperCase().slice(0,64);
+  };
+
+  // 1) Tag cards after every render with a stable key from the list item
+  if (typeof window.render === 'function' && !window.render.__aim_tagKeys){
+    const orig = window.render;
+    window.render = function(list){
+      const out = orig.apply(this, arguments);
+      try{
+        const arr = Array.isArray(list) ? list : [];
+        const cards = Array.from(document.querySelectorAll('#grid .card, #grid .load-card'));
+        cards.forEach((el,i)=>{
+          const l = arr[i];
+          if (!l) return;
+          el.dataset.aimId = makeKey(l);
+        });
+        // keep a snapshot of the list
+        window.__aimLastList = arr.slice();
+      }catch(_){}
+      return out;
+    };
+    window.render.__aim_tagKeys = true;
+  } else {
+    window.__aimLastList = window.__aimLastList || [];
+  }
+
+  // 2) When "Bid" is clicked, store the card's aimId (robust to reordering)
+  document.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button, a');
+    if (!btn) return;
+    const isBid = /(^|\s)btn(\s|$)/.test(btn.className||'') && /bid/i.test(btn.textContent||'');
+    if (!isBid) return;
+    const card = btn.closest('.card, .load-card');
+    if (!card) return;
+    const key = card.dataset.aimId;
+    if (!key) return;
+    window.__currentBidKey = key; // <-- the only thing we truly need
+  }, true);
+
+  // 3) Wrap bid(index) to also set the key from the list (covers inline onclick="bid(i)")
+  if (typeof window.bid === 'function' && !window.bid.__aim_wrapKey){
+    const orig = window.bid;
+    window.bid = function(i){
+      try{
+        const arr = Array.isArray(window.__aimLastList) ? window.__aimLastList : [];
+        const l = arr?.[Number(i)];
+        if (l) window.__currentBidKey = makeKey(l);
+      }catch(_){}
+      return orig.apply(this, arguments);
+    };
+    window.bid.__aim_wrapKey = true;
+  }
+
+  // 4) Patch/Provide submitBid() to resolve the load by key instead of index
+  (function ensureSubmitUsesKey(){
+    async function doSubmit(){
+      const err = document.getElementById('bidError');
+      const amtEl = document.getElementById('bidAmount');
+      const notesEl = document.getElementById('bidNotes');
+
+      const raw = (amtEl?.value || '').trim();
+      const amount = Number(raw);
+      if (!raw || !Number.isFinite(amount) || amount <= 0){
+        if (err) err.textContent = 'Please enter a valid dollar amount.'; 
+        return;
+      }
+
+      const s = window.sb;
+      if (!s?.auth){ window.openAuth?.(); return; }
+      const { data: userData } = await s.auth.getUser();
+      const uid = userData?.user?.id;
+      if (!uid){ window.openAuth?.(); return; }
+
+      // Find by key
+      const key = window.__currentBidKey;
+      const list = Array.isArray(window.__aimLastList) ? window.__aimLastList : [];
+      let l = null;
+      if (key){
+        l = list.find(x => makeKey(x) === key) || null;
+      }
+      if (!l){
+        if (err) err.textContent = 'Load not found.';
+        console.warn('[AIM] submitBid: key not found', { key, listLen: list.length });
+        return;
+      }
+
+      const ids = (function idsFor(){
+        const ln = l.load_number || l.loadNo || l.loadNum;
+        const id = l.id || l.uuid || l.key;
+        const ident = ln || id || makeKey(l);
+        return { load_number: String(ident), load_id: String(id || ident) };
+      })();
+
+      const miles = (function safeMiles(){
+        const m = l.miles; const n = (typeof m==='string')?Number(m.replace(/,/g,'')):Number(m);
+        return Number.isFinite(n) ? n : null;
+      })();
+
+      const payload = {
+        load_number: ids.load_number,
+        load_id: ids.load_id,
+        route_from: fromCity(l),
+        route_to: toCity(l),
+        item: pick(l.item,l.vehicle,l.commodity,'Item'),
+        miles,
+        price_offer: Math.round(amount),
+        notes: (notesEl?.value || '').trim() || null,
+        auth_user_id: uid,
+        status: 'SUBMITTED',
+        created_at: new Date().toISOString()
+      };
+
+      try{
+        const { error } = await s.from('bids').insert(payload);
+        if (error) throw error;
+        (window.closeBidModal || (m=>document.getElementById('bidModal')?.classList.remove('open')))();
+        alert('Bid submitted! You can review it in Admin.');
+      }catch(e){
+        console.error('Bid insert failed:', e);
+        if (err) err.textContent = e.message || 'Failed to submit bid.';
+      }
+    }
+
+    if (typeof window.submitBid !== 'function'){
+      window.submitBid = doSubmit;
+    } else if (!window.submitBid.__aim_wrapKey){
+      const orig = window.submitBid;
+      window.submitBid = async function(){
+        try { return await orig.apply(this, arguments); }
+        catch(_){ return await doSubmit(); }
+      };
+      window.submitBid.__aim_wrapKey = true;
+    }
+  })();
+})();
