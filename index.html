@@ -5,41 +5,31 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>American AI Marketplace</title>
   <link rel="stylesheet" href="/assets/styles.css">
-  <!-- Dark-mode overrides so you don't have to edit styles.css right now -->
-  <style>
-    body.dark{background:#0f1115;color:#e7eaf0}
-    body.dark .nav{background:#141823;border-bottom:1px solid #222736}
-    body.dark .nav a{color:#e7eaf0}
-    body.dark .hero{background:#121621;color:#e7eaf0}
-    body.dark .badge{background:#1b2132;color:#e7eaf0;border:1px solid #2a3146}
-    body.dark .panel,body.dark .card{background:#151a27;border:1px solid #242b3d;color:#e7eaf0}
-    body.dark .input{background:#0f1220;color:#e7eaf0;border:1px solid #2a3146}
-    body.dark .btn{background:#2a3146;color:#e7eaf0;border:1px solid #38405a}
-    body.dark .btn.secondary{background:transparent;border-color:#38405a;color:#e7eaf0}
-    body.dark .status{background:#22273a;color:#cfd6ff}
-    body.dark .footer{background:#121621;color:#99a3c7;border-top:1px solid #222736}
-  </style>
+
+  <!-- Supabase MUST load BEFORE your app.js -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script>
+    /* Replace the KEY with your project's ANON public key (NOT service role) */
+    window.SUPABASE_URL = "https://xntxctjjtfjeznircuas.supabase.co";
+    window.SUPABASE_KEY = "YOUR_ANON_PUBLIC_KEY_HERE";
+  </script>
+
+  <!-- Your app code uses window.SUPABASE_URL/KEY if present -->
+  <script defer src="/assets/app.js"></script>
 </head>
 <body>
-  <!-- NAV -->
   <div class="nav">
-    <div><a href="/">American AI Marketplace</a></div>
+    <div><a href="/index.html">American AI Marketplace</a></div>
     <div>
-      <a href="/">Home</a>
+      <a href="/index.html">Home</a>
+      <!-- You can keep/remove loads.html link if you want a separate page -->
+      <a href="/loads.html">Find Loads</a>
       <a href="/register.html">Register</a>
-      <a id="myBidsLink" href="#" style="display:none;">My Bids (<span id="bidCount">0</span>)</a>
-      <a id="signinLink" href="#" onclick="openAuth();return false;">Sign In</a>
-      <a id="signoutLink" href="#" style="display:none;" onclick="signout();return false;">Sign Out</a>
-      <!-- Admin link only revealed when ?admin=true (handled in app.js) -->
-      <a id="adminLink" href="#" style="display:none"
-         onclick="document.getElementById('gateModal').classList.add('open');return false;">Admin</a>
-    </div>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
-      <button id="darkToggle" class="btn secondary" style="padding:4px 8px;font-size:13px;">🌙 Dark</button>
+      <a href="/my-bids.html" id="myBidsLink" title="Feature coming soon">My Bids</a>
+      <a id="adminLink" href="#" style="display:none" onclick="document.getElementById('gateModal').classList.add('open');return false;">Admin</a>
     </div>
   </div>
 
-  <!-- HERO -->
   <section class="hero">
     <h1>Move America, intelligently.</h1>
     <div class="wrap" style="text-align:center">
@@ -49,40 +39,27 @@
     </div>
   </section>
 
-  <!-- CONTENT -->
-  <div class="wrap">
-    <!-- Controls row (+ right-aligned pager/sort toolbar holder) -->
-    <div class="controls" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+  <div class="wrap" id="loads">
+    <div class="controls">
       <input id="q" class="input" placeholder="Search city, commodity, item…">
       <select id="commodity" class="input">
         <option value="">All commodities</option>
         <option>Vehicle</option><option>Boat</option><option>Motorcycle</option>
         <option>Household</option><option>LTL</option><option>Pets</option><option>Heavy Equipment</option>
       </select>
-      <!-- toolbar injected here on the RIGHT -->
-      <div id="loads-pager-holder" style="margin-left:auto;display:flex;align-items:center;gap:10px;"></div>
+      <!-- Sort/pagination UI is injected by app.js if present -->
     </div>
-
-    <!-- Cards grid (populated by /assets/app.js) -->
     <div id="grid" class="grid"></div>
-
-    <!-- Bottom pagination -->
-    <div id="pagerBottom" style="text-align:center;margin:20px 0;">
-      <button id="prevPage" class="btn secondary">Prev</button>
-      <span id="pageInfo">Page 1 / 1</span>
-      <button id="nextPage" class="btn secondary">Next</button>
-    </div>
   </div>
 
-  <!-- FOOTER -->
   <div class="footer">
     <div class="wrap footer-note">© American AI Marketplace</div>
   </div>
 
-  <!-- VIEW MODAL -->
+  <!-- View Modal -->
   <div id="viewModal" class="modal"><div class="panel"><div id="viewContent"></div></div></div>
 
-  <!-- AUTH MODAL (carriers) -->
+  <!-- Auth Modal (carrier sign-in) -->
   <div id="authModal" class="modal"><div class="panel">
     <div class="title">Sign in</div>
     <label>Email <input id="authEmail" type="email" class="input" placeholder="name@example.com"></label>
@@ -90,15 +67,12 @@
     <label>Password <input id="authPass" type="password" class="input" placeholder="Enter your password"></label>
     <div id="authError" class="error"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn secondary" onclick="closeAuth()">Cancel</button>
+      <button class="btn secondary" onclick="document.getElementById('authModal').classList.remove('open')">Cancel</button>
       <button class="btn" onclick="signin()">Continue</button>
-    </div>
-    <div style="text-align:center;margin-top:8px;font-size:13px;">
-      Don’t have an account? <a href="/register.html">Register now</a>
     </div>
   </div></div>
 
-  <!-- ADMIN GATE MODAL -->
+  <!-- Admin Gate Modal (for /admin/) -->
   <div id="gateModal" class="modal"><div class="panel">
     <div class="title">Admin Access</div>
     <label>Username <input id="gateUser" class="input" placeholder="Enter a username"></label>
@@ -120,291 +94,5 @@
       })()">Enter</button>
     </div>
   </div></div>
-
-  <!-- Supabase + Config + App -->
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-  <!-- Inject your Supabase project + anon key so sb always initializes -->
-  <script>
-    window.SUPABASE_URL = "https://xntxctjjtfjeznircuas.supabase.co";
-    window.SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhudHhjdGpqdGZqZXpuaXJjdWFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA2ODkxNTAsImV4cCI6MjA3NjI2NTE1MH0.KeP_BvUDX1nde1iw95sv0ETtcseVEjDuR7gcYHPmsVk";
-  </script>
-  <!-- Add a cache-buster so you definitely get the new JS -->
-  <script src="/assets/app.js?v=3"></script>
-
-  <!-- Page extras: dark mode + toolbar + navbar auth + auth modal helpers -->
-  <script>
-  (function(){ // Dark mode
-    const btn = document.getElementById('darkToggle');
-    function apply(){
-      const dark = localStorage.getItem('aim_dark') === '1';
-      document.body.classList.toggle('dark', dark);
-      if (btn) btn.textContent = dark ? '☀️ Light' : '🌙 Dark';
-    }
-    if (btn) btn.addEventListener('click', () => {
-      const next = !document.body.classList.contains('dark');
-      localStorage.setItem('aim_dark', next ? '1' : '0');
-      apply();
-    });
-    apply();
-  })();
-
-  (function(){ // Right-side toolbar (pager + sort)
-    const $  = (q, el=document) => el.querySelector(q);
-    const $$ = (q, el=document) => Array.from(el.querySelectorAll(q));
-    const holder = document.getElementById('loads-pager-holder') || document.querySelector('.controls');
-
-    const bar = document.createElement('div');
-    bar.id = 'loads-pager-toolbar';
-    bar.style.display = 'flex';
-    bar.style.gap = '10px';
-    bar.style.alignItems = 'center';
-    bar.innerHTML = `
-      <label style="font-size:14px;">Show:
-        <select id="ppSel" style="font:inherit; padding:4px 6px;">
-          <option value="10">10</option>
-          <option value="25" selected>25</option>
-          <option value="50">50</option>
-          <option value="100">100</option>
-        </select>
-      </label>
-      <label style="font-size:14px;">Sort:
-        <select id="sortSel" style="font:inherit; padding:4px 6px;">
-          <optgroup label="Available date">
-            <option value="avail_desc">Newest &#9660;</option>
-            <option value="avail_asc">Oldest &#9650;</option>
-          </optgroup>
-          <optgroup label="Price">
-            <option value="price_desc">High &#9660;</option>
-            <option value="price_asc">Low &#9650;</option>
-          </optgroup>
-          <optgroup label="Miles">
-            <option value="miles_desc">Long &#9660;</option>
-            <option value="miles_asc">Short &#9650;</option>
-          </optgroup>
-          <optgroup label="Route">
-            <option value="route_az">A→Z &#9650;</option>
-            <option value="route_za">Z→A &#9660;</option>
-          </optgroup>
-          <optgroup label="Item">
-            <option value="item_az">A→Z &#9650;</option>
-            <option value="item_za">Z→A &#9660;</option>
-          </optgroup>
-        </select>
-      </label>
-      <button id="pagerPrev" class="btn secondary">Prev</button>
-      <span id="pagerInfo" style="min-width:90px; text-align:center;">Page 1 / 1</span>
-      <button id="pagerNext" class="btn secondary">Next</button>
-    `;
-    if (holder) holder.appendChild(bar);
-
-    const state = { page: 1, pageSize: 25, total: 0 };
-
-    function parseCardData(card){
-      // Miles
-      const milesLine = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
-        .find(t => /^miles:/i.test(t));
-      let miles = NaN;
-      if (milesLine){
-        const m = milesLine.match(/miles:\s*([\d,]+)/i);
-        if (m) miles = Number(m[1].replace(/,/g,''));
-      }
-      // Available date
-      const availLine = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
-        .find(t => /^first available date:/i.test(t));
-      let avail = 0;
-      if (availLine){
-        const m = availLine.match(/first available date:\s*(.+)$/i);
-        if (m){ const d = new Date(m[1].trim()); if (!isNaN(d)) avail = d.getTime(); }
-      }
-      // Price
-      const priceEl = card.querySelector('.price');
-      let price = NaN;
-      if (priceEl){
-        const txt = priceEl.textContent.replace(/[^0-9.]/g,'');
-        if (txt) price = Number(txt);
-      }
-      // Route + Item
-      const route = (card.querySelector('.route')?.textContent || '').trim().toLowerCase();
-      const item  = (Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
-                      .find(t => /^item:/i.test(t)) || '').replace(/^item:\s*/i,'').trim().toLowerCase();
-      return { miles, avail, price, route, item };
-    }
-
-    function getCards(){
-      let nodes = Array.from(document.querySelectorAll('.load-card'));
-      if (nodes.length) return nodes;
-      return Array.from(document.querySelectorAll('.card'));
-    }
-
-    function sortCards(kind){
-      const grid = document.getElementById('grid');
-      if (!grid) return;
-      const cards = getCards();
-      const enriched = cards.map(c => ({ el:c, ...parseCardData(c) }));
-      const cmp = {
-        avail_desc: (a,b) => (b.avail||0) - (a.avail||0),
-        avail_asc:  (a,b) => (a.avail||0) - (b.avail||0),
-        price_desc: (a,b) => (isFinite(b.price)?b.price:-1) - (isFinite(a.price)?a.price:-1),
-        price_asc:  (a,b) => (isFinite(a.price)?a.price:Infinity) - (isFinite(b.price)?b.price:Infinity),
-        miles_desc: (a,b) => (isFinite(b.miles)?b.miles:-1) - (isFinite(a.miles)?a.miles:-1),
-        miles_asc:  (a,b) => (isFinite(a.miles)?a.miles:Infinity) - (isFinite(b.miles)?b.miles:Infinity),
-        route_az:   (a,b) => a.route.localeCompare(b.route),
-        route_za:   (a,b) => b.route.localeCompare(a.route),
-        item_az:    (a,b) => a.item.localeCompare(b.item),
-        item_za:    (a,b) => b.item.localeCompare(a.item),
-      }[kind] || ((a,b)=>0);
-
-      enriched.sort(cmp);
-      const frag = document.createDocumentFragment();
-      enriched.forEach(x => frag.appendChild(x.el));
-      grid.appendChild(frag);
-    }
-
-    function applyPagination(){
-      const cards = getCards();
-      state.total = cards.length;
-      const last = Math.max(1, Math.ceil(state.total / state.pageSize));
-      if (state.page > last) state.page = last;
-      const start = (state.page - 1) * state.pageSize;
-      const end   = start + state.pageSize;
-      cards.forEach((el, i) => { el.style.display = (i>=start && i<end) ? '' : 'none'; });
-      const info = document.getElementById('pagerInfo');
-      if (info) info.textContent = `Page ${state.page} / ${last}`;
-      const prev = document.getElementById('pagerPrev');
-      const next = document.getElementById('pagerNext');
-      if (prev) prev.disabled = state.page <= 1;
-      if (next) next.disabled = state.page >= last;
-    }
-
-    function initOnce(){
-      const grid = document.getElementById('grid');
-      const cards = getCards();
-      if (!grid || !cards.length) return false;
-
-      // initial sort + paginate
-      sortCards(document.getElementById('sortSel')?.value || 'avail_desc');
-      state.page = 1;
-      applyPagination();
-
-      // re-apply after grid re-renders (search/commodity)
-      const mo = new MutationObserver(() => {
-        clearTimeout(initOnce._t);
-        initOnce._t = setTimeout(() => {
-          sortCards(document.getElementById('sortSel')?.value || 'avail_desc');
-          state.page = 1;
-          applyPagination();
-        }, 120);
-      });
-      mo.observe(grid, { childList: true });
-
-      // wire controls
-      const ppSel  = document.getElementById('ppSel');
-      const sSel   = document.getElementById('sortSel');
-      const prev   = document.getElementById('pagerPrev');
-      const next   = document.getElementById('pagerNext');
-
-      if (ppSel && !ppSel.__wired) {
-        ppSel.__wired = true;
-        ppSel.addEventListener('change', () => {
-          state.pageSize = parseInt(ppSel.value, 10) || 25;
-          state.page = 1;
-          applyPagination();
-        });
-      }
-      if (sSel && !sSel.__wired) {
-        sSel.__wired = true;
-        sSel.addEventListener('change', () => {
-          sortCards(sSel.value);
-          state.page = 1;
-          applyPagination();
-        });
-      }
-      if (prev && !prev.__wired) {
-        prev.__wired = true;
-        prev.addEventListener('click', () => { if (state.page>1){ state.page--; applyPagination(); } });
-      }
-      if (next && !next.__wired) {
-        next.__wired = true;
-        next.addEventListener('click', () => {
-          const last = Math.max(1, Math.ceil(state.total / state.pageSize));
-          if (state.page<last){ state.page++; applyPagination(); }
-        });
-      }
-      return true;
-    }
-
-    // try until cards render
-    const started = Date.now();
-    const t = setInterval(() => {
-      if (initOnce()) { clearInterval(t); return; }
-      if (Date.now() - started > 8000) clearInterval(t);
-    }, 200);
-  })();
-
-  (function(){ // Navbar auth + My Bids (uses sb from app.js)
-    document.addEventListener('DOMContentLoaded', async () => {
-      const signinLink = document.getElementById('signinLink');
-      const signoutLink = document.getElementById('signoutLink');
-      const myBidsLink  = document.getElementById('myBidsLink');
-      const bidCountEl  = document.getElementById('bidCount');
-
-      try{
-        const { data } = await sb.auth.getUser();
-        if (data?.user?.id){
-          if (signinLink) signinLink.style.display = 'none';
-          if (signoutLink) signoutLink.style.display = 'inline';
-          if (myBidsLink)  myBidsLink.style.display  = 'inline';
-
-          const { data: rows } = await sb
-            .from('bids')
-            .select('id', { count:'exact', head:false })
-            .eq('auth_user_id', data.user.id);
-
-          if (Array.isArray(rows) && bidCountEl) bidCountEl.textContent = rows.length || 0;
-
-          window.signout = async () => { await sb.auth.signOut(); localStorage.removeItem('aim_token'); location.reload(); };
-        } else {
-          if (signinLink) signinLink.style.display = 'inline';
-          if (signoutLink) signoutLink.style.display = 'none';
-          if (myBidsLink)  myBidsLink.style.display  = 'none';
-          window.signout = () => {};
-        }
-      }catch(e){ /* non-fatal */ }
-    });
-  })();
-
-  (function(){ // Auth modal helpers
-    window.openAuth  = () => document.getElementById('authModal')?.classList.add('open');
-    window.closeAuth = () => document.getElementById('authModal')?.classList.remove('open');
-  })();
-  </script>
-  <!-- Bid Modal (carriers) -->
-<div id="bidModal" class="modal">
-  <div class="panel">
-    <div class="title">Submit a Bid</div>
-    <label>Offer Amount (USD)
-      <input id="bidAmount" type="number" step="1" min="1" class="input" placeholder="e.g. 1299">
-    </label>
-    <div style="height:8px"></div>
-    <label>Notes (optional)
-      <input id="bidNotes" class="input" placeholder="Any extra details…">
-    </label>
-    <div id="bidError" class="error"></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn secondary" onclick="closeBidModal()">Cancel</button>
-      <button class="btn" onclick="submitBid()">Submit Bid</button>
-    </div>
-  </div>
-</div>
-<script>
-  // Bring back the tooltip on "My Bids"
-  (function(){
-    const link = document.getElementById('myBidsLink');
-    if (link) {
-      link.title = 'Feature coming soon';
-    }
-  })();
-</script>
-<script src="/assets/nav.js?v=1" defer></script>
 </body>
 </html>
