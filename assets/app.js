@@ -393,3 +393,97 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(unblockOverlays, 200);
   setTimeout(unblockOverlays, 800);
 });
+
+/* =============================
+   ONE-FILE BOOTSTRAP (append-only)
+   - Loads universal nav (if /assets/nav.js exists)
+   - Loads bid hotfix (fixes "Load not found")
+   - Ensures Bid modal exists
+   - Restores "My Bids" tooltip
+   ============================= */
+
+(function oneFileBootstrap(){
+  function loadScriptOnce(src){
+    return new Promise((resolve)=>{
+      if (document.querySelector('script[data-src="'+src+'"]')) return resolve();
+      const s = document.createElement('script');
+      s.defer = true;
+      s.dataset.src = src;
+      s.src = src + (src.includes('?') ? '&' : '?') + 'v=' + Date.now();
+      s.onload = resolve;
+      s.onerror = () => resolve(); // soft-fail
+      document.head.appendChild(s);
+    });
+  }
+
+  // Ensure Supabase client exists (uses globals if present)
+  try{
+    if (!window.sb && window.supabase && window.SUPABASE_URL && window.SUPABASE_KEY){
+      window.sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_KEY);
+    }
+  }catch(_){}
+
+  // Inject Bid modal if the page doesn’t have one
+  (function ensureBidModal(){
+    if (!document.getElementById('bidModal')){
+      const tpl = document.createElement('div');
+      tpl.innerHTML = `
+      <div id="bidModal" class="modal">
+        <div class="panel">
+          <div class="title">Submit a Bid</div>
+          <label>Offer Amount (USD)
+            <input id="bidAmount" type="number" step="1" min="1" class="input" placeholder="e.g. 1299">
+          </label>
+          <div style="height:8px"></div>
+          <label>Notes (optional)
+            <input id="bidNotes" class="input" placeholder="Any extra details…">
+          </label>
+          <div id="bidError" class="error"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+            <button class="btn secondary" onclick="(window.closeBidModal||function(){document.getElementById('bidModal')?.classList.remove('open');})()">Cancel</button>
+            <button class="btn" onclick="window.submitBid && window.submitBid()">Submit Bid</button>
+          </div>
+        </div>
+      </div>`;
+      document.body.appendChild(tpl.firstElementChild);
+    }
+  })();
+
+  // Load universal nav (if /assets/nav.js exists in your repo)
+  loadScriptOnce('/assets/nav.js');
+
+  // Load the bid filtered-index hotfix (fixes “Load not found” after filters/sort)
+  loadScriptOnce('/assets/bid-hotfix.js');
+
+  // Restore "My Bids" tooltip
+  (function restoreBidsTooltip(){
+    const link = document.getElementById('myBidsLink');
+    if (link) link.title = 'Feature coming soon';
+  })();
+
+  // Unblock stray overlays so buttons are always clickable
+  (function unblockClicks(){
+    function run(){
+      document.querySelectorAll('.modal').forEach(m=>{
+        if (!m.classList.contains('open')) { m.style.display='none'; m.style.pointerEvents='none'; }
+        else { m.style.display=''; m.style.pointerEvents=''; m.style.zIndex='99999'; }
+      });
+      const vw = Math.max(document.documentElement.clientWidth, window.innerWidth||0);
+      const vh = Math.max(document.documentElement.clientHeight, window.innerHeight||0);
+      Array.from(document.body.querySelectorAll('*')).forEach(el=>{
+        const cs = getComputedStyle(el);
+        if (cs.position==='fixed' || cs.position==='absolute'){
+          const r = el.getBoundingClientRect();
+          const covers = r.width>=vw*0.9 && r.height>=vh*0.9 && r.top<=0 && r.left<=0;
+          const invisible = (parseFloat(cs.opacity)<0.05) || cs.visibility==='hidden';
+          if (covers && (invisible || !el.innerText.trim()) && !el.classList.contains('modal')){
+            el.style.pointerEvents='none';
+          }
+        }
+      });
+    }
+    if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', run); else run();
+    setTimeout(run, 200); setTimeout(run, 800);
+    document.addEventListener('keydown', e=>{ if (e.key==='Escape'){ document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open')); }});
+  })();
+})();
