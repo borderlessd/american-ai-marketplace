@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Submit Bid — American AI Marketplace</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <style>
+    .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <div><a href="/index.html">American AI Marketplace</a></div>
+    <div>
+      <a href="/index.html">Home</a>
+      <a href="/index.html#loads">Back to Loads</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h1>Submit a Bid</h1>
+
+    <div id="bidSummary" class="panel" style="margin-bottom:12px"></div>
+
+    <div class="panel">
+      <div class="title">Your Offer</div>
+      <label>Amount (USD)
+        <input id="bidAmount" type="number" min="1" step="1" class="input" placeholder="e.g. 1299">
+      </label>
+      <div style="height:8px"></div>
+      <label>Notes (optional)
+        <input id="bidNotes" class="input" placeholder="Any extra details…">
+      </label>
+      <div id="bidError" class="error"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <a class="btn secondary" href="/index.html#loads">Cancel</a>
+        <button class="btn" id="submitBidBtn">Submit Bid</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // -------- helpers (no external deps) --------
+    function b64uDecode(s){
+      try{
+        s = s.replace(/-/g,'+').replace(/_/g,'/');
+        const pad = s.length % 4; if (pad) s += '='.repeat(4-pad);
+        return decodeURIComponent(escape(atob(s)));
+      }catch(e){ return ''; }
+    }
+    function b64uEncode(s){
+      return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    }
+    function fmt(n){ return new Intl.NumberFormat().format(n); }
+
+    // -------- read load payload from ?p= --------
+    let load = {};
+    (function(){
+      const url = new URL(location.href);
+      const raw = url.searchParams.get('p') || '';
+      try { load = JSON.parse(b64uDecode(raw) || '{}'); } catch(e){ load = {}; }
+    })();
+
+    // -------- render summary --------
+    (function(){
+      const box = document.getElementById('bidSummary');
+      if (!box) return;
+      if (!load || (!load.load_number && !load.route_from && !load.route_to)){
+        box.innerHTML = `<div class="error">Invalid or missing load. Return to the <a href="/index.html#loads">loads list</a>.</div>`;
+        document.getElementById('submitBidBtn')?.setAttribute('disabled','disabled');
+        return;
+      }
+      const priceLine = (load.price && Number(load.price)>0) ? `<div class="meta"><strong>Price:</strong> $${fmt(Number(load.price))}</div>` : '';
+      box.innerHTML = `
+        <div class="meta"><strong>Route:</strong> ${(load.route_from||'').toString()} → ${(load.route_to||'').toString()}</div>
+        <div class="meta"><strong>Item:</strong> ${(load.item||'Item').toString()}</div>
+        <div class="meta"><strong>Miles:</strong> ${load.miles!=null ? fmt(Number(load.miles)) : ''}</div>
+        <div class="meta"><strong>First Available Date:</strong> ${(load.date||load.available||'').toString()}</div>
+        ${priceLine}
+      `;
+    })();
+
+    // -------- submit -> bounce back to index with bid= --------
+    document.getElementById('submitBidBtn')?.addEventListener('click', () => {
+      const err = document.getElementById('bidError');
+      const amountRaw = (document.getElementById('bidAmount')?.value || '').trim();
+      const notesRaw  = (document.getElementById('bidNotes')?.value || '').trim();
+
+      const amount = Number(amountRaw);
+      if (!amountRaw || !Number.isFinite(amount) || amount <= 0){
+        if (err) err.textContent = 'Please enter a valid dollar amount.';
+        return;
+      }
+
+      const envelope = {
+        payload: {
+          load_number: load.load_number || load.load_id,
+          load_id:     load.load_id || load.load_number,
+          route_from:  load.route_from || '',
+          route_to:    load.route_to || '',
+          item:        load.item || 'Item',
+          miles:       (load.miles != null ? Number(load.miles) : null),
+          date:        load.date || load.available || ''
+        },
+        offer: Math.round(amount),
+        notes: notesRaw || null
+      };
+
+      const encoded = b64uEncode(JSON.stringify(envelope));
+      // Use query so /index.html can read it even after reloads
+      window.location.href = '/index.html?bid=' + encoded + '#loads';
+    });
+  </script>
+</body>
+</html>
