@@ -1,31 +1,32 @@
 /* =========================================================================
-   /assets/app.js  —  clean rewrite
+   /assets/app.js — cleaned, consolidated, non-destructive
    ========================================================================= */
 
-//// ---------------------------- Config --------------------------------- ////
+/* ---------------------------- Config & Globals ---------------------------- */
 let LOADS = [];
-let __lastList = [];          // last rendered (filtered/sorted) list for safe indexing
-let __currentBidIndex = null; // index into __lastList used by Bid modal
+let __lastList = [];               // last rendered list (after filters/sort)
+let __currentBidKey = null;        // stable key of the card you clicked
+let __aimAuth = { ready:false, uid:null }; // fast auth cache
 
-// Supabase client from globals injected in HTML (window.SUPABASE_URL/KEY)
+// Supabase: created from global HTML vars if present (window.SUPABASE_URL/KEY)
 let sb = (function initSupabase() {
   try {
-    if (!window.SUPABASE_URL || !window.SUPABASE_KEY || !window.supabase) return null;
-    const c = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_KEY);
-    window.sb = c; // expose for nav.js
-    return c;
+    if (!window.sb && window.supabase && window.SUPABASE_URL && window.SUPABASE_KEY) {
+      window.sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_KEY);
+    }
+    return window.sb || null;
   } catch (e) {
     console.warn('Supabase init failed:', e);
     return null;
   }
 })();
 
-//// ---------------------------- Helpers -------------------------------- ////
+/* ------------------------------- Utilities -------------------------------- */
 const $  = (q, el=document) => el.querySelector(q);
 const $$ = (q, el=document) => Array.from(el.querySelectorAll(q));
 const fmt = (n) => new Intl.NumberFormat().format(n);
+const pick = (...xs)=>{ for(const x of xs){ if(x!=null && x!=='') return x; } return ''; };
 
-function pick(...xs){ for(const x of xs){ if(x!=null && x!=='') return x; } return ''; }
 function fromCity(l){ return pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from); }
 function toCity(l){   return pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to); }
 function itemName(l){ return pick(l.item,l.vehicle,l.commodity,'Item'); }
@@ -36,7 +37,7 @@ function safeMiles(l){
   return Number.isFinite(n) ? n : '';
 }
 
-// Show price only when it's a real number > 0
+// Hide price line unless a real number is present
 function priceHTML(l){
   let p = l.price;
   if (p == null) return '';
@@ -53,21 +54,22 @@ function priceHTML(l){
   return '';
 }
 
-// Always provide identifiers expected by DB
+// Stable, deterministic key for each load (used to resolve on submit)
+function makeKey(l){
+  const k = l.load_number || l.id || l.uuid || l.key;
+  if (k) return String(k);
+  return `${fromCity(l)||'FROM'}-${toCity(l)||'TO'}-${dateStr(l)||''}`
+    .replace(/\s+/g,'_').toUpperCase().slice(0,64);
+}
+
 function getLoadIdentifiers(l){
   const ln = l.load_number || l.loadNo || l.loadNum;
   const id = l.id || l.uuid || l.key;
-  let ident = ln || id;
-  if (!ident){
-    const f = fromCity(l) || 'FROM';
-    const t = toCity(l) || 'TO';
-    const d = (dateStr(l) || new Date().toISOString().slice(0,10));
-    ident = `${String(f)}-${String(t)}-${String(d)}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
-  }
+  let ident = ln || id || makeKey(l);
   return { load_number: String(ident), load_id: String(id || ident) };
 }
 
-//// ---------------------------- Data ----------------------------------- ////
+/* --------------------------------- Data ----------------------------------- */
 async function loadData(){
   try{
     const res = await fetch('/assets/loads.json?ts=' + Date.now(), { cache: 'no-store' });
@@ -77,25 +79,26 @@ async function loadData(){
     console.error('Failed to load loads.json', e);
     LOADS = [];
   }
-  applyFilters();  // renders and updates __lastList
+  applyFilters(); // triggers first render
 }
 
-//// ---------------------------- Render --------------------------------- ////
+/* -------------------------------- Render ---------------------------------- */
 function render(list){
   __lastList = Array.isArray(list) ? list : [];
   const grid = $('#grid'); if (!grid) return;
 
   grid.innerHTML = __lastList.map((l, idx) => {
-    const routeFrom  = pick(fromCity(l));
-    const routeTo    = pick(toCity(l));
+    const routeFrom  = fromCity(l);
+    const routeTo    = toCity(l);
     const status     = (l.status || 'open').toString().toUpperCase();
     const miles      = safeMiles(l);
     const date       = dateStr(l);
     const item       = itemName(l);
     const priceBlock = priceHTML(l);
+    const key        = makeKey(l);  // stable key
 
     return `
-      <article class="card load-card">
+      <article class="card load-card" data-aim-id="${key}">
         <div class="route">${routeFrom} → ${routeTo} <span class="status ${status.toLowerCase()}">${status}</span></div>
         <div class="meta"><strong>Item:</strong> ${item}</div>
         <div class="meta"><strong>Miles:</strong> ${miles ? fmt(miles) : ''}</div>
@@ -103,17 +106,16 @@ function render(list){
         ${priceBlock}
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
           <button class="btn secondary" onclick="openView(${idx})">View</button>
-          <button class="btn" onclick="bid(${idx})">Bid</button>
+          <button class="btn">Bid</button>
         </div>
       </article>
     `;
   }).join('');
 
-  // After render, (re)apply sort/pagination because card count changed
-  applySortAndPagination();
+  applySortAndPagination();  // keep your current toolbar behavior if present
 }
 
-//// ---------------------------- Filters -------------------------------- ////
+/* ------------------------------- Filtering -------------------------------- */
 function applyFilters(){
   const term = ($('#q')?.value || '').toLowerCase();
   const comm = ($('#commodity')?.value || '').toLowerCase();
@@ -122,7 +124,7 @@ function applyFilters(){
     const hay = (
       (itemName(l) || '') + ' ' +
       (fromCity(l) || '') + ' ' +
-      (toCity(l) || '')   + ' ' +
+      (toCity(l)   || '') + ' ' +
       (l.commodity || '')
     ).toLowerCase();
     const okQ = !term || hay.includes(term);
@@ -133,24 +135,25 @@ function applyFilters(){
   render(list);
 }
 
-//// ---------------------------- Sort + Pagination ---------------------- ////
+/* -------------------------- Sort + Pagination (opt) ------------------------ */
+/* Uses existing controls if they exist in your HTML: 
+   #sortSel, #ppSel, #pagerPrev, #pagerNext, #pagerInfo */
 const pagerState = { page: 1, pageSize: 25 };
 
 function getCards(){ return Array.from(document.querySelectorAll('#grid .card, #grid .load-card')); }
 
 function parseCardData(card){
+  const metas = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim());
+
   // Miles
-  const milesLine = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
-    .find(t => /^miles:/i.test(t));
+  const milesLine = metas.find(t => /^miles:/i.test(t));
   let miles = NaN;
   if (milesLine){ const m = milesLine.match(/miles:\s*([\d,]+)/i); if (m) miles = Number(m[1].replace(/,/g,'')); }
 
   // First Available Date
-  const availLine = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
-    .find(t => /^first available date:/i.test(t));
+  const availLine = metas.find(t => /^first available date:/i.test(t));
   let avail = 0;
-  if (availLine){ const m = availLine.match(/first available date:\s*(.+)$/i);
-    if (m){ const d = new Date(m[1].trim()); if (!isNaN(d)) avail = d.getTime(); } }
+  if (availLine){ const m = availLine.match(/first available date:\s*(.+)$/i); if (m){ const d = new Date(m[1].trim()); if (!isNaN(d)) avail = d.getTime(); } }
 
   // Price
   const priceEl = card.querySelector('.price');
@@ -160,10 +163,9 @@ function parseCardData(card){
     if (txt) price = Number(txt);
   }
 
-  // Route + Item
+  // Route + Item (for alpha sorts)
   const route = (card.querySelector('.route')?.textContent || '').trim().toLowerCase();
-  const item  = (Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
-                  .find(t => /^item:/i.test(t)) || '').replace(/^item:\s*/i,'').trim().toLowerCase();
+  const item  = (metas.find(t => /^item:/i.test(t)) || '').replace(/^item:\s*/i,'').trim().toLowerCase();
   return { miles, avail, price, route, item, el: card };
 }
 
@@ -174,10 +176,10 @@ function sortCards(kind){
   const cmp = {
     avail_desc: (a,b) => (b.avail||0) - (a.avail||0),
     avail_asc:  (a,b) => (a.avail||0) - (b.avail||0),
-    price_desc: (a,b) => (isFinite(b.price)?b.price:-1) - (isFinite(a.price)?a.price:-1),
-    price_asc:  (a,b) => (isFinite(a.price)?a.price:Infinity) - (isFinite(b.price)?b.price:Infinity),
-    miles_desc: (a,b) => (isFinite(b.miles)?b.miles:-1) - (isFinite(a.miles)?a.miles:-1),
-    miles_asc:  (a,b) => (isFinite(a.miles)?a.miles:Infinity) - (isFinite(b.miles)?b.miles:Infinity),
+    price_desc: (a,b) => (isFinite(b.price)?b.price:-1)   - (isFinite(a.price)?a.price:-1),
+    price_asc:  (a,b) => (isFinite(a.price)?a.price:1e15) - (isFinite(b.price)?b.price:1e15),
+    miles_desc: (a,b) => (isFinite(b.miles)?b.miles:-1)   - (isFinite(a.miles)?a.miles:-1),
+    miles_asc:  (a,b) => (isFinite(a.miles)?a.miles:1e15) - (isFinite(b.miles)?b.miles:1e15),
     route_az:   (a,b) => a.route.localeCompare(b.route),
     route_za:   (a,b) => b.route.localeCompare(a.route),
     item_az:    (a,b) => a.item.localeCompare(b.item),
@@ -224,7 +226,7 @@ function wireSortAndPaginationOnce(){
   });}
 }
 
-//// ---------------------------- View modal ----------------------------- ////
+/* --------------------------------- Modals --------------------------------- */
 function openView(index){
   const l = __lastList[index]; if (!l) return;
   const box = $('#viewContent'); if (!box) return;
@@ -244,17 +246,39 @@ function openView(index){
     ${l.notes ? `<div class="meta"><strong>Notes:</strong> ${String(l.notes)}</div>` : ''}
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       <button class="btn secondary" onclick="closeView()">Close</button>
-      <button class="btn" onclick="bid(${index})">Bid</button>
+      <button class="btn" onclick="openBidFromIndex(${index})">Bid</button>
     </div>
   `;
   $('#viewModal')?.classList.add('open');
 }
 function closeView(){ $('#viewModal')?.classList.remove('open'); }
 
-//// ---------------------------- Auth + Bid ----------------------------- ////
 function openAuth(){ $('#authModal')?.classList.add('open'); }
 function closeAuth(){ $('#authModal')?.classList.remove('open'); }
 
+function openBidModal(){ $('#bidModal')?.classList.add('open'); }
+function closeBidModal(){
+  $('#bidModal')?.classList.remove('open');
+  const e=$('#bidError'); if (e) e.textContent='';
+  const a=$('#bidAmount'); if (a) a.value='';
+  const n=$('#bidNotes'); if (n) n.value='';
+}
+
+/* ------------------------------- Auth cache ------------------------------- */
+(async function initAuthCache(){
+  try{
+    if (sb?.auth) {
+      const set = (uid)=>{ __aimAuth.ready = true; __aimAuth.uid = uid || null; };
+      const { data } = await sb.auth.getUser();
+      set(data?.user?.id || null);
+      sb.auth.onAuthStateChange((_e, session)=> set(session?.user?.id || null));
+    } else {
+      __aimAuth.ready = true;
+    }
+  }catch(_){ __aimAuth.ready = true; }
+})();
+
+/* ------------------------------- Sign in/out ------------------------------ */
 async function signin(){
   const err = $('#authError');
   try{
@@ -269,25 +293,39 @@ async function signin(){
   }catch(e){ if (err) err.textContent = e.message || 'Sign-in failed.'; }
 }
 
-// Bid button → require auth → open modal
-async function bid(index){
-  __currentBidIndex = Number(index);
-  try{
-    if (!sb){ openAuth(); return; }
-    const { data } = await sb.auth.getUser();
-    if (!data?.user?.id){ openAuth(); return; }
-    openBidModal();
-  }catch(e){ openAuth(); }
-}
+/* ----------------------------- Bid flow (stable) -------------------------- */
+// 1) Clicking any "Bid" button sets the card’s stable key and opens the modal
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('button, a');
+  if (!el) return;
 
-function openBidModal(){ $('#bidModal')?.classList.add('open'); }
-function closeBidModal(){
-  $('#bidModal')?.classList.remove('open');
-  const e=$('#bidError'); if (e) e.textContent='';
-  const a=$('#bidAmount'); if (a) a.value='';
-  const n=$('#bidNotes'); if (n) n.value='';
-}
+  const looksLikeBid = /(^|\s)btn(\s|$)/.test(el.className||'') && /bid/i.test(el.textContent||'');
+  if (!looksLikeBid) return;
 
+  const card = el.closest('.card, .load-card');
+  const key  = card?.dataset?.aimId;
+  if (!key) return; // render not finished yet; ignore
+
+  __currentBidKey = key;
+
+  // If logged out, open sign-in immediately (fast, no network wait)
+  if (!__aimAuth.uid){
+    openAuth(); e.preventDefault(); return;
+  }
+
+  openBidModal(); e.preventDefault();
+});
+
+// 2) Also support inline onclick="bid(index)" if your cards still have it
+function openBidFromIndex(index){
+  const l = __lastList?.[Number(index)];
+  if (l) __currentBidKey = makeKey(l);
+  if (!__aimAuth.uid) { openAuth(); return; }
+  openBidModal();
+}
+async function bid(index){ openBidFromIndex(index); } // expose for legacy
+
+// 3) Submit uses the stable key to find the exact load regardless of filters/sorts
 async function submitBid(){
   const err = $('#bidError');
   const raw = ($('#bidAmount')?.value || '').trim();
@@ -296,32 +334,36 @@ async function submitBid(){
     if (err) err.textContent = 'Please enter a valid dollar amount.'; return;
   }
 
-  if (!sb){ openAuth(); return; }
-  const { data: userData } = await sb.auth.getUser();
-  const userId = userData?.user?.id;
-  if (!userId){ openAuth(); return; }
+  // ensure we have a user id (use cache, fallback to network once)
+  let uid = __aimAuth.uid;
+  if (!uid && sb?.auth){
+    try { const { data } = await sb.auth.getUser(); uid = data?.user?.id || null; } catch(_){}
+  }
+  if (!uid){ openAuth(); return; }
 
-  const l = __lastList[__currentBidIndex];
+  // resolve load by key
+  const l = __lastList.find(x => makeKey(x) === __currentBidKey);
   if (!l){ if (err) err.textContent = 'Load not found.'; return; }
 
   const ids = getLoadIdentifiers(l);
+  const miles = (function(){ const m = safeMiles(l); return m===''?null:m; })();
 
   const payload = {
-    load_number: ids.load_number,  // satisfies NOT NULL if present
+    load_number: ids.load_number,
     load_id: ids.load_id,
     route_from: fromCity(l),
     route_to: toCity(l),
     item: itemName(l),
-    miles: (safeMiles(l) || null),
+    miles,
     price_offer: Math.round(amount),
     notes: ($('#bidNotes')?.value || '').trim() || null,
-    auth_user_id: userId,
+    auth_user_id: uid,
     status: 'SUBMITTED',
     created_at: new Date().toISOString()
   };
 
   try{
-    const { error } = await sb.from('bids').insert(payload);
+    const { error } = await (sb ? sb.from('bids').insert(payload) : Promise.reject(new Error('No DB client')));
     if (error) throw error;
     closeBidModal();
     alert('Bid submitted! You can review it in Admin.');
@@ -331,17 +373,16 @@ async function submitBid(){
   }
 }
 
-//// ---------------------------- Boot ----------------------------------- ////
+/* --------------------------------- Boot ----------------------------------- */
 function exposeGlobals(){
   window.openView = openView;
   window.closeView = closeView;
-  window.bid = bid;
-  window.signin = signin;
   window.openAuth = openAuth;
   window.closeAuth = closeAuth;
   window.openBidModal = openBidModal;
   window.closeBidModal = closeBidModal;
   window.submitBid = submitBid;
+  window.bid = bid; // legacy
 }
 
 function wireInputs(){
@@ -354,7 +395,7 @@ function wireInputs(){
 }
 
 function unblockOverlays(){
-  // close hidden modals; disable invisible full-screen blockers
+  // Close hidden modals; disable invisible full-screen blockers
   $$('.modal').forEach(m=>{
     if (!m.classList.contains('open')) { m.style.display='none'; m.style.pointerEvents='none'; }
     else { m.style.display=''; m.style.pointerEvents=''; m.style.zIndex='99999'; }
@@ -376,7 +417,7 @@ function unblockOverlays(){
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Show Admin link only when ?admin=true
+  // Show Admin link only with ?admin=true
   try{
     const url = new URL(location.href);
     const adminFlag = url.searchParams.get('admin')==='true';
@@ -393,558 +434,3 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(unblockOverlays, 200);
   setTimeout(unblockOverlays, 800);
 });
-
-/* =============================
-   ONE-FILE BOOTSTRAP (append-only)
-   - Loads universal nav (if /assets/nav.js exists)
-   - Loads bid hotfix (fixes "Load not found")
-   - Ensures Bid modal exists
-   - Restores "My Bids" tooltip
-   ============================= */
-
-(function oneFileBootstrap(){
-  function loadScriptOnce(src){
-    return new Promise((resolve)=>{
-      if (document.querySelector('script[data-src="'+src+'"]')) return resolve();
-      const s = document.createElement('script');
-      s.defer = true;
-      s.dataset.src = src;
-      s.src = src + (src.includes('?') ? '&' : '?') + 'v=' + Date.now();
-      s.onload = resolve;
-      s.onerror = () => resolve(); // soft-fail
-      document.head.appendChild(s);
-    });
-  }
-
-  // Ensure Supabase client exists (uses globals if present)
-  try{
-    if (!window.sb && window.supabase && window.SUPABASE_URL && window.SUPABASE_KEY){
-      window.sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_KEY);
-    }
-  }catch(_){}
-
-  // Inject Bid modal if the page doesn’t have one
-  (function ensureBidModal(){
-    if (!document.getElementById('bidModal')){
-      const tpl = document.createElement('div');
-      tpl.innerHTML = `
-      <div id="bidModal" class="modal">
-        <div class="panel">
-          <div class="title">Submit a Bid</div>
-          <label>Offer Amount (USD)
-            <input id="bidAmount" type="number" step="1" min="1" class="input" placeholder="e.g. 1299">
-          </label>
-          <div style="height:8px"></div>
-          <label>Notes (optional)
-            <input id="bidNotes" class="input" placeholder="Any extra details…">
-          </label>
-          <div id="bidError" class="error"></div>
-          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-            <button class="btn secondary" onclick="(window.closeBidModal||function(){document.getElementById('bidModal')?.classList.remove('open');})()">Cancel</button>
-            <button class="btn" onclick="window.submitBid && window.submitBid()">Submit Bid</button>
-          </div>
-        </div>
-      </div>`;
-      document.body.appendChild(tpl.firstElementChild);
-    }
-  })();
-
-  // Load universal nav (if /assets/nav.js exists in your repo)
-  loadScriptOnce('/assets/nav.js');
-
-  // Load the bid filtered-index hotfix (fixes “Load not found” after filters/sort)
-  loadScriptOnce('/assets/bid-hotfix.js');
-
-  // Restore "My Bids" tooltip
-  (function restoreBidsTooltip(){
-    const link = document.getElementById('myBidsLink');
-    if (link) link.title = 'Feature coming soon';
-  })();
-
-  // Unblock stray overlays so buttons are always clickable
-  (function unblockClicks(){
-    function run(){
-      document.querySelectorAll('.modal').forEach(m=>{
-        if (!m.classList.contains('open')) { m.style.display='none'; m.style.pointerEvents='none'; }
-        else { m.style.display=''; m.style.pointerEvents=''; m.style.zIndex='99999'; }
-      });
-      const vw = Math.max(document.documentElement.clientWidth, window.innerWidth||0);
-      const vh = Math.max(document.documentElement.clientHeight, window.innerHeight||0);
-      Array.from(document.body.querySelectorAll('*')).forEach(el=>{
-        const cs = getComputedStyle(el);
-        if (cs.position==='fixed' || cs.position==='absolute'){
-          const r = el.getBoundingClientRect();
-          const covers = r.width>=vw*0.9 && r.height>=vh*0.9 && r.top<=0 && r.left<=0;
-          const invisible = (parseFloat(cs.opacity)<0.05) || cs.visibility==='hidden';
-          if (covers && (invisible || !el.innerText.trim()) && !el.classList.contains('modal')){
-            el.style.pointerEvents='none';
-          }
-        }
-      });
-    }
-    if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', run); else run();
-    setTimeout(run, 200); setTimeout(run, 800);
-    document.addEventListener('keydown', e=>{ if (e.key==='Escape'){ document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open')); }});
-  })();
-})();
-
-/* ===============================
-   ONE-BLOCK BID INDEX FIX (append-only)
-   - Capture the last list your UI actually rendered
-   - Use that list for Bid/Submit so indexes match
-   - Minimal diagnostics to console (once)
-   =============================== */
-(function bidIndexFix(){
-  // 1) Capture the last list passed to render(list)
-  if (typeof window.render === 'function' && !window.render.__aim_capture){
-    const __origRender = window.render;
-    window.render = function(list){
-      try { window.__aimLastList = Array.isArray(list) ? list.slice() : []; }
-      catch(_) { window.__aimLastList = []; }
-      return __origRender.apply(this, arguments);
-    };
-    window.render.__aim_capture = true;
-  } else {
-    // Ensure the holder exists even if render isn't patched yet
-    window.__aimLastList = window.__aimLastList || [];
-  }
-
-  // Helpers (local; won’t stomp your globals)
-  const pick = (...xs)=>{ for(const x of xs){ if(x!=null && x!=='') return x; } return ''; };
-  const fromCity = (l)=> (typeof window.fromCity==='function' ? window.fromCity(l)
-                    : pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from));
-  const toCity   = (l)=> (typeof window.toCity==='function' ? window.toCity(l)
-                    : pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to));
-  const itemName = (l)=> (typeof window.itemName==='function' ? window.itemName(l)
-                    : pick(l.item,l.vehicle,l.commodity,'Item'));
-  const dateStr  = (l)=> { const r = pick(l.date,l.available,l.availableDate,l.pickup_date,l.pickupDate,l.readyDate,l.date_available); return r?String(r):''; };
-  const safeMiles= (l)=> { const m=l.miles; const n=(typeof m==='string')?Number(m.replace(/,/g,'')):Number(m); return Number.isFinite(n)?n:null; };
-  const idsFor   = (l)=> {
-    const ln = l.load_number || l.loadNo || l.loadNum;
-    const id = l.id || l.uuid || l.key;
-    let ident = ln || id;
-    if (!ident){
-      const f = fromCity(l) || 'FROM', t = toCity(l) || 'TO', d = dateStr(l) || new Date().toISOString().slice(0,10);
-      ident = `${f}-${t}-${d}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
-    }
-    return { load_number: String(ident), load_id: String(id || ident) };
-  };
-
-  // 2) Safe getter uses the EXACT rendered list first
-  function getLoadByRenderedIndex(index){
-    const list = Array.isArray(window.__aimLastList) ? window.__aimLastList : [];
-    if (index!=null && index>=0 && index<list.length) return list[index];
-    // fallback (shouldn’t be used, but harmless)
-    const all = Array.isArray(window.LOADS) ? window.LOADS : [];
-    if (index!=null && index>=0 && index<all.length) return all[index];
-    return null;
-  }
-
-  // 3) Patch bid() so it stores the filtered index and only opens sign-in if needed
-  (function patchBid(){
-    const wrapped = async function(index){
-      window.__currentBidIndex = Number(index);
-      try{
-        const s = window.sb;
-        if (!s?.auth){ window.openAuth?.(); return; }
-        const { data } = await s.auth.getUser();
-        if (!data?.user?.id){ window.openAuth?.(); return; }
-        (window.openBidModal || (m=>document.getElementById('bidModal')?.classList.add('open')))();
-      }catch(_){ window.openAuth?.(); }
-    };
-    if (typeof window.bid !== 'function'){
-      window.bid = wrapped;
-    } else if (!window.bid.__aim_wrapped){
-      const orig = window.bid;
-      window.bid = function(i){ window.__currentBidIndex = Number(i); return orig.apply(this, arguments); };
-      window.bid.__aim_wrapped = true;
-    }
-  })();
-
-  // 4) Patch submitBid() to pull from the rendered list (and to satisfy DB columns)
-  (function patchSubmit(){
-    async function fixedSubmit(){
-      const err = document.getElementById('bidError');
-      const amtEl = document.getElementById('bidAmount');
-      const notesEl = document.getElementById('bidNotes');
-
-      const raw = (amtEl?.value || '').trim();
-      const amount = Number(raw);
-      if (!raw || !Number.isFinite(amount) || amount <= 0){
-        if (err) err.textContent = 'Please enter a valid dollar amount.'; 
-        return;
-      }
-
-      const s = window.sb;
-      if (!s?.auth){ window.openAuth?.(); return; }
-      const { data: userData } = await s.auth.getUser();
-      const uid = userData?.user?.id;
-      if (!uid){ window.openAuth?.(); return; }
-
-      const idx = (typeof window.__currentBidIndex === 'number') ? window.__currentBidIndex : null;
-      const l = getLoadByRenderedIndex(idx);
-
-      if (!l){
-        if (err) err.textContent = 'Load not found.'; 
-        // One-time diagnostic to help us see what the page thinks:
-        if (!window.__aimLoggedOnce){
-          console.warn('[AIM] Bid submit: no load at index', idx, 'lastListLen=', (window.__aimLastList||[]).length);
-          window.__aimLoggedOnce = true;
-        }
-        return;
-      }
-
-      const ids = idsFor(l);
-      const payload = {
-        load_number: ids.load_number,      // NOT NULL constraint? satisfied.
-        load_id: ids.load_id,
-        route_from: fromCity(l),
-        route_to: toCity(l),
-        item: itemName(l),
-        miles: safeMiles(l),
-        price_offer: Math.round(amount),
-        notes: (notesEl?.value || '').trim() || null,
-        auth_user_id: uid,
-        status: 'SUBMITTED',
-        created_at: new Date().toISOString()
-      };
-
-      try{
-        const { error } = await s.from('bids').insert(payload);
-        if (error) throw error;
-        (window.closeBidModal || (m=>document.getElementById('bidModal')?.classList.remove('open')))();
-        alert('Bid submitted! You can review it in Admin.');
-      }catch(e){
-        console.error('Bid insert failed:', e);
-        if (err) err.textContent = e.message || 'Failed to submit bid.';
-      }
-    }
-
-    if (typeof window.submitBid !== 'function'){
-      window.submitBid = fixedSubmit;
-    } else if (!window.submitBid.__aim_wrapped){
-      const orig = window.submitBid;
-      window.submitBid = async function(){
-        // Try original first; if it fails with missing load, fall back
-        try { return await orig.apply(this, arguments); }
-        catch (e) { return await fixedSubmit(); }
-      };
-      window.submitBid.__aim_wrapped = true;
-    }
-  })();
-})();
-
-/* ===============================
-   STABLE BID PATCH (append-only)
-   - Use DOM order to map the clicked card -> list item
-   - Works even after filters/sort/pagination
-   - No HTML edits required
-   =============================== */
-(function stableBidPatch(){
-  // 1) Capture last list passed to render(list)
-  if (typeof window.render === 'function' && !window.render.__aim_capture) {
-    const orig = window.render;
-    window.render = function(list){
-      try { window.__aimLastList = Array.isArray(list) ? list.slice() : []; }
-      catch(_) { window.__aimLastList = []; }
-      const out = orig.apply(this, arguments);
-
-      // After render: tag cards with a stable ID (for safety) based on the list item
-      const cards = Array.from(document.querySelectorAll('#grid .card, #grid .load-card'));
-      cards.forEach((el, i) => {
-        const l = window.__aimLastList?.[i];
-        if (!l) return;
-        const id = (l.load_number || l.id || `${(l.from_city||l.origin||'FROM')}-${(l.to_city||l.destination||'TO')}-${(l.available||l.pickup_date||l.date||'')}`).toString();
-        el.dataset.aimId = id;
-      });
-
-      return out;
-    };
-    window.render.__aim_capture = true;
-  } else {
-    window.__aimLastList = window.__aimLastList || [];
-  }
-
-  // Helpers
-  const pick = (...xs)=>{ for (const x of xs){ if (x!=null && x!=='') return x; } return ''; };
-  const fromCity = l => pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from);
-  const toCity   = l => pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to);
-  const itemName = l => pick(l.item,l.vehicle,l.commodity,'Item');
-  const dateStr  = l => { const r = pick(l.date,l.available,l.availableDate,l.pickup_date,l.pickupDate,l.readyDate,l.date_available); return r?String(r):''; };
-  const safeMiles= l => { const m=l.miles; const n=(typeof m==='string')?Number(m.replace(/,/g,'')):Number(m); return Number.isFinite(n)?n:null; };
-  const idsFor   = l => {
-    const ln = l.load_number || l.loadNo || l.loadNum;
-    const id = l.id || l.uuid || l.key;
-    let ident = ln || id;
-    if (!ident) {
-      const f = fromCity(l) || 'FROM', t = toCity(l) || 'TO', d = dateStr(l) || new Date().toISOString().slice(0,10);
-      ident = `${f}-${t}-${d}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
-    }
-    return { load_number: String(ident), load_id: String(id || ident) };
-  };
-
-  // 2) Compute index from DOM, not from inline onclick numbers
-  function indexFromCard(cardEl){
-    if (!cardEl) return null;
-    const parent = cardEl.parentNode;
-    if (!parent) return null;
-    const siblings = Array.from(parent.children);
-    const idx = siblings.indexOf(cardEl);
-    return (idx >= 0) ? idx : null;
-  }
-
-  // 3) Delegate clicks on Bid buttons: set current index based on DOM
-  document.addEventListener('click', async (e) => {
-    const el = e.target.closest('button, a');
-    if (!el) return;
-
-    // Treat any button with text "Bid" as bid trigger
-    const isBid = /(^|\s)btn(\s|$)/.test(el.className || '') && /bid/i.test(el.textContent || '');
-    if (!isBid) return;
-
-    const card = el.closest('.card, .load-card');
-    const idx = indexFromCard(card);
-    if (idx == null) return;
-
-    // store index into the last rendered list
-    window.__currentBidIndex = idx;
-
-    // If you already defined window.bid, let it run (it will now have the correct index)
-    if (typeof window.bid === 'function') {
-      return; // your existing handler will run from the inline onclick or other wiring
-    }
-
-    // Minimal fallback: require auth then open modal
-    try{
-      const s = window.sb;
-      if (!s?.auth){ window.openAuth?.(); return; }
-      const { data } = await s.auth.getUser();
-      if (!data?.user?.id){ window.openAuth?.(); return; }
-      (window.openBidModal || (m=>document.getElementById('bidModal')?.classList.add('open')))();
-    }catch(_){ window.openAuth?.(); }
-  }, true);
-
-  // 4) Patch/Provide submitBid to use __aimLastList[__currentBidIndex]
-  (function ensureSubmitBid(){
-    async function fixedSubmit(){
-      const err = document.getElementById('bidError');
-      const amtEl = document.getElementById('bidAmount');
-      const notesEl = document.getElementById('bidNotes');
-
-      const raw = (amtEl?.value || '').trim();
-      const amount = Number(raw);
-      if (!raw || !Number.isFinite(amount) || amount <= 0){
-        if (err) err.textContent = 'Please enter a valid dollar amount.'; 
-        return;
-      }
-
-      const s = window.sb;
-      if (!s?.auth){ window.openAuth?.(); return; }
-      const { data: userData } = await s.auth.getUser();
-      const uid = userData?.user?.id;
-      if (!uid){ window.openAuth?.(); return; }
-
-      const idx = (typeof window.__currentBidIndex === 'number') ? window.__currentBidIndex : null;
-      const list = Array.isArray(window.__aimLastList) ? window.__aimLastList : [];
-      const l = (idx!=null && idx >= 0) ? list[idx] : null;
-
-      if (!l){
-        if (err) err.textContent = 'Load not found.';
-        if (!window.__aimLoggedOnce){
-          console.warn('[AIM] No load at DOM index', idx, 'listLen=', list.length);
-          window.__aimLoggedOnce = true;
-        }
-        return;
-      }
-
-      const ids = idsFor(l);
-      const payload = {
-        load_number: ids.load_number,
-        load_id: ids.load_id,
-        route_from: fromCity(l),
-        route_to: toCity(l),
-        item: itemName(l),
-        miles: safeMiles(l),
-        price_offer: Math.round(amount),
-        notes: (notesEl?.value || '').trim() || null,
-        auth_user_id: uid,
-        status: 'SUBMITTED',
-        created_at: new Date().toISOString()
-      };
-
-      try{
-        const { error } = await s.from('bids').insert(payload);
-        if (error) throw error;
-        (window.closeBidModal || (m=>document.getElementById('bidModal')?.classList.remove('open')))();
-        alert('Bid submitted! You can review it in Admin.');
-      }catch(e){
-        console.error('Bid insert failed:', e);
-        if (err) err.textContent = e.message || 'Failed to submit bid.';
-      }
-    }
-
-    if (typeof window.submitBid !== 'function'){
-      window.submitBid = fixedSubmit;
-    } else if (!window.submitBid.__aim_wrapped){
-      const orig = window.submitBid;
-      window.submitBid = async function(){
-        try { return await orig.apply(this, arguments); }
-        catch (_) { return await fixedSubmit(); }
-      };
-      window.submitBid.__aim_wrapped = true;
-    }
-  })();
-})();
-
-/* ===============================
-   FINAL "LOAD NOT FOUND" FIX (append-only)
-   - Use a stable key per card (dataset.aimId)
-   - Works regardless of sorting, filtering, or pagination
-   =============================== */
-(function bidKeyFix(){
-  // Helper bits
-  const pick = (...xs)=>{ for (const x of xs){ if (x!=null && x!=='') return x; } return ''; };
-  const fromCity = l => pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from);
-  const toCity   = l => pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to);
-  const dateStr  = l => { const r = pick(l.date,l.available,l.availableDate,l.pickup_date,l.pickupDate,l.readyDate,l.date_available); return r?String(r):''; };
-  const makeKey  = l => {
-    // Preferred: existing identifiers
-    const k = l.load_number || l.id || l.uuid || l.key;
-    if (k) return String(k);
-    // Fallback: deterministic composite key
-    return `${fromCity(l)||'FROM'}-${toCity(l)||'TO'}-${dateStr(l)||''}`
-      .replace(/\s+/g,'_').toUpperCase().slice(0,64);
-  };
-
-  // 1) Tag cards after every render with a stable key from the list item
-  if (typeof window.render === 'function' && !window.render.__aim_tagKeys){
-    const orig = window.render;
-    window.render = function(list){
-      const out = orig.apply(this, arguments);
-      try{
-        const arr = Array.isArray(list) ? list : [];
-        const cards = Array.from(document.querySelectorAll('#grid .card, #grid .load-card'));
-        cards.forEach((el,i)=>{
-          const l = arr[i];
-          if (!l) return;
-          el.dataset.aimId = makeKey(l);
-        });
-        // keep a snapshot of the list
-        window.__aimLastList = arr.slice();
-      }catch(_){}
-      return out;
-    };
-    window.render.__aim_tagKeys = true;
-  } else {
-    window.__aimLastList = window.__aimLastList || [];
-  }
-
-  // 2) When "Bid" is clicked, store the card's aimId (robust to reordering)
-  document.addEventListener('click', (e)=>{
-    const btn = e.target.closest('button, a');
-    if (!btn) return;
-    const isBid = /(^|\s)btn(\s|$)/.test(btn.className||'') && /bid/i.test(btn.textContent||'');
-    if (!isBid) return;
-    const card = btn.closest('.card, .load-card');
-    if (!card) return;
-    const key = card.dataset.aimId;
-    if (!key) return;
-    window.__currentBidKey = key; // <-- the only thing we truly need
-  }, true);
-
-  // 3) Wrap bid(index) to also set the key from the list (covers inline onclick="bid(i)")
-  if (typeof window.bid === 'function' && !window.bid.__aim_wrapKey){
-    const orig = window.bid;
-    window.bid = function(i){
-      try{
-        const arr = Array.isArray(window.__aimLastList) ? window.__aimLastList : [];
-        const l = arr?.[Number(i)];
-        if (l) window.__currentBidKey = makeKey(l);
-      }catch(_){}
-      return orig.apply(this, arguments);
-    };
-    window.bid.__aim_wrapKey = true;
-  }
-
-  // 4) Patch/Provide submitBid() to resolve the load by key instead of index
-  (function ensureSubmitUsesKey(){
-    async function doSubmit(){
-      const err = document.getElementById('bidError');
-      const amtEl = document.getElementById('bidAmount');
-      const notesEl = document.getElementById('bidNotes');
-
-      const raw = (amtEl?.value || '').trim();
-      const amount = Number(raw);
-      if (!raw || !Number.isFinite(amount) || amount <= 0){
-        if (err) err.textContent = 'Please enter a valid dollar amount.'; 
-        return;
-      }
-
-      const s = window.sb;
-      if (!s?.auth){ window.openAuth?.(); return; }
-      const { data: userData } = await s.auth.getUser();
-      const uid = userData?.user?.id;
-      if (!uid){ window.openAuth?.(); return; }
-
-      // Find by key
-      const key = window.__currentBidKey;
-      const list = Array.isArray(window.__aimLastList) ? window.__aimLastList : [];
-      let l = null;
-      if (key){
-        l = list.find(x => makeKey(x) === key) || null;
-      }
-      if (!l){
-        if (err) err.textContent = 'Load not found.';
-        console.warn('[AIM] submitBid: key not found', { key, listLen: list.length });
-        return;
-      }
-
-      const ids = (function idsFor(){
-        const ln = l.load_number || l.loadNo || l.loadNum;
-        const id = l.id || l.uuid || l.key;
-        const ident = ln || id || makeKey(l);
-        return { load_number: String(ident), load_id: String(id || ident) };
-      })();
-
-      const miles = (function safeMiles(){
-        const m = l.miles; const n = (typeof m==='string')?Number(m.replace(/,/g,'')):Number(m);
-        return Number.isFinite(n) ? n : null;
-      })();
-
-      const payload = {
-        load_number: ids.load_number,
-        load_id: ids.load_id,
-        route_from: fromCity(l),
-        route_to: toCity(l),
-        item: pick(l.item,l.vehicle,l.commodity,'Item'),
-        miles,
-        price_offer: Math.round(amount),
-        notes: (notesEl?.value || '').trim() || null,
-        auth_user_id: uid,
-        status: 'SUBMITTED',
-        created_at: new Date().toISOString()
-      };
-
-      try{
-        const { error } = await s.from('bids').insert(payload);
-        if (error) throw error;
-        (window.closeBidModal || (m=>document.getElementById('bidModal')?.classList.remove('open')))();
-        alert('Bid submitted! You can review it in Admin.');
-      }catch(e){
-        console.error('Bid insert failed:', e);
-        if (err) err.textContent = e.message || 'Failed to submit bid.';
-      }
-    }
-
-    if (typeof window.submitBid !== 'function'){
-      window.submitBid = doSubmit;
-    } else if (!window.submitBid.__aim_wrapKey){
-      const orig = window.submitBid;
-      window.submitBid = async function(){
-        try { return await orig.apply(this, arguments); }
-        catch(_){ return await doSubmit(); }
-      };
-      window.submitBid.__aim_wrapKey = true;
-    }
-  })();
-})();
