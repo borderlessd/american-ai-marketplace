@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>American AI Marketplace</title>
   <link rel="stylesheet" href="/assets/styles.css">
-  <!-- Dark-mode overrides (kept here so you don't have to edit styles.css) -->
+  <!-- Dark-mode overrides so you don't have to edit styles.css right now -->
   <style>
     body.dark{background:#0f1115;color:#e7eaf0}
     body.dark .nav{background:#141823;border-bottom:1px solid #222736}
@@ -33,7 +33,7 @@
       <a id="myBidsLink" href="#" style="display:none;">My Bids (<span id="bidCount">0</span>)</a>
       <a id="signinLink" href="#" onclick="openAuth();return false;">Sign In</a>
       <a id="signoutLink" href="#" style="display:none;" onclick="signout();return false;">Sign Out</a>
-      <!-- Admin link only revealed when ?admin=true (handled in app.js) -->
+      <!-- Admin link only revealed when ?admin=true (handled by app.js) -->
       <a id="adminLink" href="#" style="display:none"
          onclick="document.getElementById('gateModal').classList.add('open');return false;">Admin</a>
     </div>
@@ -54,7 +54,7 @@
 
   <!-- CONTENT -->
   <div class="wrap">
-    <!-- Controls row (+ right-aligned pager holder) -->
+    <!-- Controls row (+ right-aligned pager/sort toolbar holder) -->
     <div class="controls" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
       <input id="q" class="input" placeholder="Search city, commodity, item…">
       <select id="commodity" class="input">
@@ -62,13 +62,14 @@
         <option>Vehicle</option><option>Boat</option><option>Motorcycle</option>
         <option>Household</option><option>LTL</option><option>Pets</option><option>Heavy Equipment</option>
       </select>
+      <!-- IMPORTANT: toolbar will be injected here on the RIGHT -->
       <div id="loads-pager-holder" style="margin-left:auto;display:flex;align-items:center;gap:10px;"></div>
     </div>
 
     <!-- Cards grid (populated by /assets/app.js) -->
     <div id="grid" class="grid"></div>
 
-    <!-- Bottom pagination (wired by /assets/app.js or toolbar script) -->
+    <!-- Bottom pagination (wired by script below) -->
     <div id="pagerBottom" style="text-align:center;margin:20px 0;">
       <button id="prevPage" class="btn secondary">Prev</button>
       <span id="pageInfo">Page 1 / 1</span>
@@ -127,9 +128,9 @@
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script src="/assets/app.js"></script>
 
-  <!-- Enhancements: dark mode + toolbar (pager + sort) + navbar auth wiring -->
+  <!-- Enhancements: dark mode + toolbar (pager + sort) + navbar auth wiring + auth modal helpers -->
   <script>
-  /* -------- Dark mode: robust wiring -------- */
+  /* -------- Dark mode -------- */
   (function(){
     const btn = document.getElementById('darkToggle');
     function apply() {
@@ -153,6 +154,7 @@
     const $$ = (q, el=document) => Array.from(el.querySelectorAll(q));
     const holder = document.getElementById('loads-pager-holder') || document.querySelector('.controls');
 
+    // Build toolbar with UNIFORM ▲ ▼ icons (&#9650; / &#9660;)
     const bar = document.createElement('div');
     bar.id = 'loads-pager-toolbar';
     bar.style.display = 'flex';
@@ -169,10 +171,26 @@
       </label>
       <label style="font-size:14px;">Sort:
         <select id="sortSel" style="font:inherit; padding:4px 6px;">
-          <option value="avail_desc">Available ⬇</option>
-          <option value="avail_asc">Available ⬆</option>
-          <option value="price_desc">Price ⬇</option>
-          <option value="price_asc">Price ⬆</option>
+          <optgroup label="Available date">
+            <option value="avail_desc">Newest &#9660;</option>
+            <option value="avail_asc">Oldest &#9650;</option>
+          </optgroup>
+          <optgroup label="Price">
+            <option value="price_desc">High &#9660;</option>
+            <option value="price_asc">Low &#9650;</option>
+          </optgroup>
+          <optgroup label="Miles">
+            <option value="miles_desc">Long &#9660;</option>
+            <option value="miles_asc">Short &#9650;</option>
+          </optgroup>
+          <optgroup label="Route">
+            <option value="route_az">A→Z &#9650;</option>
+            <option value="route_za">Z→A &#9660;</option>
+          </optgroup>
+          <optgroup label="Item">
+            <option value="item_az">A→Z &#9650;</option>
+            <option value="item_za">Z→A &#9660;</option>
+          </optgroup>
         </select>
       </label>
       <button id="pagerPrev" class="btn secondary">Prev</button>
@@ -183,31 +201,45 @@
 
     const state = { page: 1, pageSize: 25, total: 0 };
 
+    function text(el, sel){ return (el.querySelector(sel)?.textContent || '').trim(); }
+
     function parseCardData(card){
-      const availLine = Array.from(card.querySelectorAll('.meta'))
-        .map(e=>e.textContent.trim())
+      // Miles
+      const milesLine = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
+        .find(t => /^miles:/i.test(t));
+      let miles = NaN;
+      if (milesLine){
+        const m = milesLine.match(/miles:\s*([\d,]+)/i);
+        if (m) miles = Number(m[1].replace(/,/g,''));
+      }
+      // Available
+      const availLine = Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
         .find(t => /^first available date:/i.test(t));
       let avail = 0;
-      if (availLine) {
+      if (availLine){
         const m = availLine.match(/first available date:\s*(.+)$/i);
-        if (m) {
-          const d = new Date(m[1].trim());
-          if (!isNaN(d)) avail = d.getTime();
-        }
+        if (m){ const d = new Date(m[1].trim()); if (!isNaN(d)) avail = d.getTime(); }
       }
+      // Price
       const priceEl = card.querySelector('.price');
       let price = NaN;
-      if (priceEl) {
+      if (priceEl){
         const txt = priceEl.textContent.replace(/[^0-9.]/g,'');
         if (txt) price = Number(txt);
       }
-      return { avail, price };
+      // Route + Item for alpha sorts
+      const route = text(card, '.route');
+      const item  = (Array.from(card.querySelectorAll('.meta')).map(e=>e.textContent.trim())
+                      .find(t => /^item:/i.test(t)) || '').replace(/^item:\s*/i,'').trim();
+      return { miles, avail, price, route: route.toLowerCase(), item: item.toLowerCase() };
     }
+
     function getCards(){
       let nodes = $$('.load-card');
       if (nodes.length) return nodes;
       return $$('.card');
     }
+
     function sortCards(kind){
       const grid = document.getElementById('grid');
       if (!grid) return;
@@ -218,12 +250,20 @@
         avail_asc:  (a,b) => (a.avail||0) - (b.avail||0),
         price_desc: (a,b) => (isFinite(b.price)?b.price:-1) - (isFinite(a.price)?a.price:-1),
         price_asc:  (a,b) => (isFinite(a.price)?a.price:Infinity) - (isFinite(b.price)?b.price:Infinity),
+        miles_desc: (a,b) => (isFinite(b.miles)?b.miles:-1) - (isFinite(a.miles)?a.miles:-1),
+        miles_asc:  (a,b) => (isFinite(a.miles)?a.miles:Infinity) - (isFinite(b.miles)?b.miles:Infinity),
+        route_az:   (a,b) => a.route.localeCompare(b.route),
+        route_za:   (a,b) => b.route.localeCompare(a.route),
+        item_az:    (a,b) => a.item.localeCompare(b.item),
+        item_za:    (a,b) => b.item.localeCompare(a.item),
       }[kind] || ((a,b)=>0);
+
       enriched.sort(cmp);
       const frag = document.createDocumentFragment();
       enriched.forEach(x => frag.appendChild(x.el));
       grid.appendChild(frag);
     }
+
     function applyPagination(){
       const cards = getCards();
       state.total = cards.length;
@@ -239,13 +279,18 @@
       if (prev) prev.disabled = state.page <= 1;
       if (next) next.disabled = state.page >= last;
     }
+
     function initOnce(){
       const grid = document.getElementById('grid');
       const cards = getCards();
       if (!grid || !cards.length) return false;
+
+      // initial sort + paginate
       sortCards(document.getElementById('sortSel')?.value || 'avail_desc');
       state.page = 1;
       applyPagination();
+
+      // Re-apply after the grid re-renders (e.g., search/commodity filter)
       const mo = new MutationObserver(() => {
         clearTimeout(initOnce._t);
         initOnce._t = setTimeout(() => {
@@ -255,21 +300,44 @@
         }, 120);
       });
       mo.observe(grid, { childList: true });
+
+      // Wire controls
       const ppSel  = document.getElementById('ppSel');
       const sSel   = document.getElementById('sortSel');
       const prev   = document.getElementById('pagerPrev');
       const next   = document.getElementById('pagerNext');
-      if (ppSel && !ppSel.__wired) { ppSel.__wired = true; ppSel.addEventListener('change', () => {
-        state.pageSize = parseInt(ppSel.value, 10) || 25; state.page = 1; applyPagination(); }); }
-      if (sSel && !sSel.__wired)  { sSel.__wired = true; sSel.addEventListener('change', () => {
-        sortCards(sSel.value); state.page = 1; applyPagination(); }); }
-      if (prev && !prev.__wired)  { prev.__wired = true; prev.addEventListener('click', () => {
-        if (state.page>1){ state.page--; applyPagination(); } }); }
-      if (next && !next.__wired)  { next.__wired = true; next.addEventListener('click', () => {
-        const last = Math.max(1, Math.ceil(state.total / state.pageSize));
-        if (state.page<last){ state.page++; applyPagination(); } }); }
+
+      if (ppSel && !ppSel.__wired) {
+        ppSel.__wired = true;
+        ppSel.addEventListener('change', () => {
+          state.pageSize = parseInt(ppSel.value, 10) || 25;
+          state.page = 1;
+          applyPagination();
+        });
+      }
+      if (sSel && !sSel.__wired) {
+        sSel.__wired = true;
+        sSel.addEventListener('change', () => {
+          sortCards(sSel.value);
+          state.page = 1;
+          applyPagination();
+        });
+      }
+      if (prev && !prev.__wired) {
+        prev.__wired = true;
+        prev.addEventListener('click', () => { if (state.page>1){ state.page--; applyPagination(); } });
+      }
+      if (next && !next.__wired) {
+        next.__wired = true;
+        next.addEventListener('click', () => {
+          const last = Math.max(1, Math.ceil(state.total / state.pageSize));
+          if (state.page<last){ state.page++; applyPagination(); }
+        });
+      }
       return true;
     }
+
+    // Try until cards render
     const started = Date.now();
     const t = setInterval(() => {
       if (initOnce()) { clearInterval(t); return; }
@@ -291,7 +359,10 @@
           if (signinLink) signinLink.style.display = 'none';
           if (signoutLink) signoutLink.style.display = 'inline';
           if (myBidsLink)  myBidsLink.style.display  = 'inline';
-          const { data: rows } = await sb.from('bids').select('id', { count:'exact', head:false }).eq('auth_user_id', data.user.id);
+          const { data: rows } = await sb
+            .from('bids')
+            .select('id', { count:'exact', head:false })
+            .eq('auth_user_id', data.user.id);
           if (Array.isArray(rows) && bidCountEl) bidCountEl.textContent = rows.length || 0;
           window.signout = async () => { await sb.auth.signOut(); localStorage.removeItem('aim_token'); location.reload(); };
         } else {
@@ -301,8 +372,13 @@
           window.signout = () => {};
         }
       }catch(e){ /* non-fatal */ }
-      window.closeAuth = () => document.getElementById('authModal')?.classList.remove('open');
     });
+  })();
+
+  /* -------- Auth modal helpers (so menu Sign In + Bid can open it) -------- */
+  (function(){
+    window.openAuth  = () => document.getElementById('authModal')?.classList.add('open');
+    window.closeAuth = () => document.getElementById('authModal')?.classList.remove('open');
   })();
   </script>
 </body>
