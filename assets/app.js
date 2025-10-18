@@ -1,4 +1,4 @@
-=/* =========================================================================
+===/* =========================================================================
    /assets/app.js — rock-solid render + bid
    ========================================================================= */
 
@@ -646,5 +646,173 @@ document.addEventListener('DOMContentLoaded', ()=>{
         if (err) err.textContent = e.message || 'Failed to submit bid.';
       }
     };
+  })();
+})();
+
+/* ============================================================
+   FINAL CLICK + SUBMIT HARDENING (append-only, safe)
+   - Works even for bottom rows after sorting/pagination
+   - Prevents page jump, captures the exact card element
+   ============================================================ */
+(function finalBidClickHardening(){
+  // 1) Cancel any anchor that would jump the page (scroll-to-top)
+  if (!document.__aimKillAnchors){
+    document.__aimKillAnchors = true;
+    document.addEventListener('click', (e)=>{
+      const a = e.target.closest('a');
+      if (!a) return;
+      const href = a.getAttribute('href') || '';
+      if (href === '' || href === '#' || href.startsWith('#')) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }
+    }, true);
+  }
+
+  // 2) Capture the exact card that was clicked for Bid
+  if (!document.__aimBidCapture){
+    document.__aimBidCapture = true;
+    document.addEventListener('click', (e)=>{
+      const btn = e.target.closest('button, a');
+      if (!btn) return;
+
+      // treat anything with "btn" class and text "Bid" as a bid trigger
+      const looksBtn = /(^|\s)btn(\s|$)/.test(btn.className||'');
+      const looksBid = /bid/i.test(btn.textContent || '');
+      if (!looksBtn || !looksBid) return;
+
+      const card = btn.closest('.load-card, .card');
+      if (!card) return;
+
+      // absolutely kill any bubbling that could cause scroll or reflow jumps
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+
+      // remember the exact element and pull payload immediately
+      window.__aimLastClickedCard = card;
+      const payloadStr = card.dataset?.aimPayload || '';
+      let snap = null;
+      if (payloadStr) { try { snap = JSON.parse(payloadStr); } catch(_){} }
+      window.__aimBidSnapshot = snap || null;
+
+      // also store the key for fallbacks
+      const key = (snap && snap.__key) || card.dataset?.aimId || null;
+      window.__currentBidKey = key;
+
+      // auth gate then open modal
+      const uid = (window.__aimAuth && window.__aimAuth.uid) || null;
+      if (!uid) {
+        (typeof window.openAuth==='function' ? window.openAuth() : document.getElementById('authModal')?.classList.add('open'));
+        return;
+      }
+      (typeof window.openBidModal==='function' ? window.openBidModal() : document.getElementById('bidModal')?.classList.add('open'));
+    }, true);
+  }
+
+  // 3) Submit always prefers the card you actually clicked
+  (function patchSubmit(){
+    const orig = (typeof window.submitBid === 'function') ? window.submitBid : null;
+
+    async function robustSubmit(){
+      const err = document.getElementById('bidError');
+      const amtEl = document.getElementById('bidAmount');
+      const notesEl = document.getElementById('bidNotes');
+
+      const raw = (amtEl?.value || '').trim();
+      const amount = Number(raw);
+      if (!raw || !Number.isFinite(amount) || amount <= 0){
+        if (err) err.textContent = 'Please enter a valid dollar amount.';
+        return;
+      }
+
+      // resolve auth
+      let uid = (window.__aimAuth && window.__aimAuth.uid) || null;
+      if (!uid && window.sb?.auth){
+        try { const { data } = await sb.auth.getUser(); uid = data?.user?.id || null; } catch(_){}
+      }
+      if (!uid){
+        (typeof window.openAuth==='function' ? window.openAuth() : document.getElementById('authModal')?.classList.add('open'));
+        return;
+      }
+
+      // Prefer: payload embedded on the exact card element that was clicked
+      let snap = window.__aimBidSnapshot || null;
+      if (!snap && window.__aimLastClickedCard){
+        const s = window.__aimLastClickedCard.dataset?.aimPayload || '';
+        if (s) { try { snap = JSON.parse(s); } catch(_){} }
+      }
+
+      // Fallback: key -> last list
+      const pick = (...xs)=>{ for (const x of xs){ if (x!=null && x!=='') return x; } return ''; };
+      const fromCity = l => pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from);
+      const toCity   = l => pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to);
+      const dateStr  = l => { const r = pick(l.date,l.available,l.availableDate,l.pickup_date,l.pickupDate,l.readyDate,l.date_available); return r?String(r):''; };
+      const makeKey  = l => (l?.load_number || l?.id || l?.uuid || l?.key) ||
+                            `${fromCity(l)||'FROM'}-${toCity(l)||'TO'}-${dateStr(l)||''}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
+      const getIds   = l => { const id1 = l?.load_number || l?.id || l?.uuid || l?.key || makeKey(l)||''; return { load_number:String(id1), load_id:String(l?.id || id1) }; };
+      const safeMilesNum = (m)=>{ const n=(typeof m==='string')?Number(m.replace(/,/g,'')):Number(m); return Number.isFinite(n)?n:null; };
+
+      if (!snap){
+        const key = window.__currentBidKey || null;
+        const list = Array.isArray(window.__lastList) ? window.__lastList : [];
+        const obj = key ? list.find(x => makeKey(x) === key) : null;
+        if (obj){
+          const ids = getIds(obj);
+          snap = {
+            __key: makeKey(obj),
+            load_number: ids.load_number,
+            load_id: ids.load_id,
+            route_from: fromCity(obj)||'',
+            route_to: toCity(obj)||'',
+            item: pick(obj.item,obj.vehicle,obj.commodity,'Item'),
+            miles: safeMilesNum(obj.miles),
+            available: dateStr(obj)||''
+          };
+        }
+      }
+
+      // Last resort: still nothing
+      if (!snap){
+        if (err) err.textContent = 'Load not found.';
+        return;
+      }
+
+      // Build payload
+      const ids = getIds({ load_number: snap.load_number, id: snap.load_id });
+      const payload = {
+        load_number: ids.load_number,
+        load_id: ids.load_id,
+        route_from: snap.route_from || '',
+        route_to: snap.route_to || '',
+        item: snap.item || 'Item',
+        miles: (typeof snap.miles==='number' ? snap.miles : null),
+        price_offer: Math.round(amount),
+        notes: (notesEl?.value || '').trim() || null,
+        auth_user_id: uid,
+        status: 'SUBMITTED',
+        created_at: new Date().toISOString()
+      };
+
+      try{
+        const { error } = await (window.sb ? sb.from('bids').insert(payload) : Promise.reject(new Error('No DB client')));
+        if (error) throw error;
+        (typeof window.closeBidModal==='function' ? window.closeBidModal() : document.getElementById('bidModal')?.classList.remove('open'));
+        alert('Bid submitted! You can review it in Admin.');
+        window.__aimBidSnapshot = null;
+        window.__aimLastClickedCard = null;
+      }catch(e){
+        console.error('Bid insert failed:', e);
+        if (err) err.textContent = e.message || 'Failed to submit bid.';
+      }
+    }
+
+    if (!orig) {
+      window.submitBid = robustSubmit;
+    } else if (!window.submitBid.__aim_finalPatch){
+      window.submitBid = robustSubmit;
+      window.submitBid.__aim_finalPatch = true;
+    }
   })();
 })();
