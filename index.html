@@ -5,6 +5,22 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>American AI Marketplace</title>
   <link rel="stylesheet" href="/assets/styles.css">
+  <!-- Dark-mode overrides (kept here so you don't have to edit styles.css) -->
+  <style>
+    body.dark{background:#0f1115;color:#e7eaf0}
+    body.dark .nav{background:#141823;border-bottom:1px solid #222736}
+    body.dark .nav a{color:#e7eaf0}
+    body.dark .hero{background:#121621;color:#e7eaf0}
+    body.dark .badge{background:#1b2132;color:#e7eaf0;border:1px solid #2a3146}
+    body.dark .panel,body.dark .card{background:#151a27;border:1px solid #242b3d;color:#e7eaf0}
+    body.dark .input{background:#0f1220;color:#e7eaf0;border:1px solid #2a3146}
+    body.dark .btn{background:#2a3146;color:#e7eaf0;border:1px solid #38405a}
+    body.dark .btn.secondary{background:transparent;border-color:#38405a;color:#e7eaf0}
+    body.dark .status{background:#22273a;color:#cfd6ff}
+    body.dark .footer{background:#121621;color:#99a3c7;border-top:1px solid #222736}
+    body.dark table{color:#e7eaf0}
+    body.dark th,body.dark td{border-bottom:1px solid #2a3146}
+  </style>
 </head>
 <body>
   <!-- NAV -->
@@ -38,7 +54,7 @@
 
   <!-- CONTENT -->
   <div class="wrap">
-    <!-- Controls row (+ right-aligned pager holder that app.js moves toolbar into) -->
+    <!-- Controls row (+ right-aligned pager holder) -->
     <div class="controls" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
       <input id="q" class="input" placeholder="Search city, commodity, item…">
       <select id="commodity" class="input">
@@ -46,14 +62,13 @@
         <option>Vehicle</option><option>Boat</option><option>Motorcycle</option>
         <option>Household</option><option>LTL</option><option>Pets</option><option>Heavy Equipment</option>
       </select>
-      <!-- IMPORTANT: this holder must exist so pagination can sit to the right -->
       <div id="loads-pager-holder" style="margin-left:auto;display:flex;align-items:center;gap:10px;"></div>
     </div>
 
     <!-- Cards grid (populated by /assets/app.js) -->
     <div id="grid" class="grid"></div>
 
-    <!-- Bottom pagination (wired by /assets/app.js) -->
+    <!-- Bottom pagination (wired by /assets/app.js or toolbar script) -->
     <div id="pagerBottom" style="text-align:center;margin:20px 0;">
       <button id="prevPage" class="btn secondary">Prev</button>
       <span id="pageInfo">Page 1 / 1</span>
@@ -112,64 +127,183 @@
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script src="/assets/app.js"></script>
 
-  <!-- Dark mode + navbar auth/bids wiring (runs after app.js is available) -->
+  <!-- Enhancements: dark mode + toolbar (pager + sort) + navbar auth wiring -->
   <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      // Dark mode
-      const btn = document.getElementById('darkToggle');
-      const applyDark = () => {
-        const dark = localStorage.getItem('aim_dark') === '1';
-        document.body.classList.toggle('dark', dark);
-        if (btn) btn.textContent = dark ? '☀️ Light' : '🌙 Dark';
-      };
-      if (btn) {
-        btn.addEventListener('click', () => {
-          const next = document.body.classList.toggle('dark');
-          localStorage.setItem('aim_dark', next ? '1' : '0');
-          btn.textContent = next ? '☀️ Light' : '🌙 Dark';
-        });
-      }
-      applyDark();
+  /* -------- Dark mode: robust wiring -------- */
+  (function(){
+    const btn = document.getElementById('darkToggle');
+    function apply() {
+      const dark = localStorage.getItem('aim_dark') === '1';
+      document.body.classList.toggle('dark', dark);
+      if (btn) btn.textContent = dark ? '☀️ Light' : '🌙 Dark';
+    }
+    if (btn) {
+      btn.addEventListener('click', () => {
+        const next = !document.body.classList.contains('dark');
+        localStorage.setItem('aim_dark', next ? '1' : '0');
+        apply();
+      });
+    }
+    apply();
+  })();
 
-      // Nav: sign in/out + My Bids (count)
+  /* -------- Pagination + Sort toolbar (non-destructive; works with existing cards) -------- */
+  (function(){
+    const $  = (q, el=document) => el.querySelector(q);
+    const $$ = (q, el=document) => Array.from(el.querySelectorAll(q));
+    const holder = document.getElementById('loads-pager-holder') || document.querySelector('.controls');
+
+    const bar = document.createElement('div');
+    bar.id = 'loads-pager-toolbar';
+    bar.style.display = 'flex';
+    bar.style.gap = '10px';
+    bar.style.alignItems = 'center';
+    bar.innerHTML = `
+      <label style="font-size:14px;">Show:
+        <select id="ppSel" style="font:inherit; padding:4px 6px;">
+          <option value="10">10</option>
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </label>
+      <label style="font-size:14px;">Sort:
+        <select id="sortSel" style="font:inherit; padding:4px 6px;">
+          <option value="avail_desc">Available ⬇</option>
+          <option value="avail_asc">Available ⬆</option>
+          <option value="price_desc">Price ⬇</option>
+          <option value="price_asc">Price ⬆</option>
+        </select>
+      </label>
+      <button id="pagerPrev" class="btn secondary">Prev</button>
+      <span id="pagerInfo" style="min-width:90px; text-align:center;">Page 1 / 1</span>
+      <button id="pagerNext" class="btn secondary">Next</button>
+    `;
+    if (holder) holder.appendChild(bar);
+
+    const state = { page: 1, pageSize: 25, total: 0 };
+
+    function parseCardData(card){
+      const availLine = Array.from(card.querySelectorAll('.meta'))
+        .map(e=>e.textContent.trim())
+        .find(t => /^first available date:/i.test(t));
+      let avail = 0;
+      if (availLine) {
+        const m = availLine.match(/first available date:\s*(.+)$/i);
+        if (m) {
+          const d = new Date(m[1].trim());
+          if (!isNaN(d)) avail = d.getTime();
+        }
+      }
+      const priceEl = card.querySelector('.price');
+      let price = NaN;
+      if (priceEl) {
+        const txt = priceEl.textContent.replace(/[^0-9.]/g,'');
+        if (txt) price = Number(txt);
+      }
+      return { avail, price };
+    }
+    function getCards(){
+      let nodes = $$('.load-card');
+      if (nodes.length) return nodes;
+      return $$('.card');
+    }
+    function sortCards(kind){
+      const grid = document.getElementById('grid');
+      if (!grid) return;
+      const cards = getCards();
+      const enriched = cards.map(c => ({ el:c, ...parseCardData(c) }));
+      const cmp = {
+        avail_desc: (a,b) => (b.avail||0) - (a.avail||0),
+        avail_asc:  (a,b) => (a.avail||0) - (b.avail||0),
+        price_desc: (a,b) => (isFinite(b.price)?b.price:-1) - (isFinite(a.price)?a.price:-1),
+        price_asc:  (a,b) => (isFinite(a.price)?a.price:Infinity) - (isFinite(b.price)?b.price:Infinity),
+      }[kind] || ((a,b)=>0);
+      enriched.sort(cmp);
+      const frag = document.createDocumentFragment();
+      enriched.forEach(x => frag.appendChild(x.el));
+      grid.appendChild(frag);
+    }
+    function applyPagination(){
+      const cards = getCards();
+      state.total = cards.length;
+      const last = Math.max(1, Math.ceil(state.total / state.pageSize));
+      if (state.page > last) state.page = last;
+      const start = (state.page - 1) * state.pageSize;
+      const end   = start + state.pageSize;
+      cards.forEach((el, i) => { el.style.display = (i>=start && i<end) ? '' : 'none'; });
+      const info = document.getElementById('pagerInfo');
+      if (info) info.textContent = `Page ${state.page} / ${last}`;
+      const prev = document.getElementById('pagerPrev');
+      const next = document.getElementById('pagerNext');
+      if (prev) prev.disabled = state.page <= 1;
+      if (next) next.disabled = state.page >= last;
+    }
+    function initOnce(){
+      const grid = document.getElementById('grid');
+      const cards = getCards();
+      if (!grid || !cards.length) return false;
+      sortCards(document.getElementById('sortSel')?.value || 'avail_desc');
+      state.page = 1;
+      applyPagination();
+      const mo = new MutationObserver(() => {
+        clearTimeout(initOnce._t);
+        initOnce._t = setTimeout(() => {
+          sortCards(document.getElementById('sortSel')?.value || 'avail_desc');
+          state.page = 1;
+          applyPagination();
+        }, 120);
+      });
+      mo.observe(grid, { childList: true });
+      const ppSel  = document.getElementById('ppSel');
+      const sSel   = document.getElementById('sortSel');
+      const prev   = document.getElementById('pagerPrev');
+      const next   = document.getElementById('pagerNext');
+      if (ppSel && !ppSel.__wired) { ppSel.__wired = true; ppSel.addEventListener('change', () => {
+        state.pageSize = parseInt(ppSel.value, 10) || 25; state.page = 1; applyPagination(); }); }
+      if (sSel && !sSel.__wired)  { sSel.__wired = true; sSel.addEventListener('change', () => {
+        sortCards(sSel.value); state.page = 1; applyPagination(); }); }
+      if (prev && !prev.__wired)  { prev.__wired = true; prev.addEventListener('click', () => {
+        if (state.page>1){ state.page--; applyPagination(); } }); }
+      if (next && !next.__wired)  { next.__wired = true; next.addEventListener('click', () => {
+        const last = Math.max(1, Math.ceil(state.total / state.pageSize));
+        if (state.page<last){ state.page++; applyPagination(); } }); }
+      return true;
+    }
+    const started = Date.now();
+    const t = setInterval(() => {
+      if (initOnce()) { clearInterval(t); return; }
+      if (Date.now() - started > 8000) clearInterval(t);
+    }, 200);
+  })();
+
+  /* -------- Navbar auth + My Bids count (uses sb from app.js) -------- */
+  (function(){
+    document.addEventListener('DOMContentLoaded', async () => {
       const signinLink = document.getElementById('signinLink');
       const signoutLink = document.getElementById('signoutLink');
       const myBidsLink  = document.getElementById('myBidsLink');
       const bidCountEl  = document.getElementById('bidCount');
 
-      (async () => {
-        try {
-          const { data } = await sb.auth.getUser();
-          if (data?.user?.id) {
-            if (signinLink) signinLink.style.display = 'none';
-            if (signoutLink) signoutLink.style.display = 'inline';
-            if (myBidsLink)  myBidsLink.style.display  = 'inline';
-
-            // Count this user's bids
-            const { data: rows } = await sb
-              .from('bids')
-              .select('id', { count: 'exact', head: false })
-              .eq('auth_user_id', data.user.id);
-            if (Array.isArray(rows) && bidCountEl) bidCountEl.textContent = rows.length || 0;
-
-            // Optional: click for a simple “my bids” filter (could route to a page later)
-            myBidsLink && (myBidsLink.onclick = (e) => {
-              e.preventDefault();
-              alert('My Bids view coming next. For now, use Admin to see all bids.');
-            });
-          } else {
-            if (signinLink) signinLink.style.display = 'inline';
-            if (signoutLink) signoutLink.style.display = 'none';
-            if (myBidsLink)  myBidsLink.style.display  = 'none';
-          }
-        } catch(e) {
-          // non-fatal
+      try{
+        const { data } = await sb.auth.getUser();
+        if (data?.user?.id){
+          if (signinLink) signinLink.style.display = 'none';
+          if (signoutLink) signoutLink.style.display = 'inline';
+          if (myBidsLink)  myBidsLink.style.display  = 'inline';
+          const { data: rows } = await sb.from('bids').select('id', { count:'exact', head:false }).eq('auth_user_id', data.user.id);
+          if (Array.isArray(rows) && bidCountEl) bidCountEl.textContent = rows.length || 0;
+          window.signout = async () => { await sb.auth.signOut(); localStorage.removeItem('aim_token'); location.reload(); };
+        } else {
+          if (signinLink) signinLink.style.display = 'inline';
+          if (signoutLink) signoutLink.style.display = 'none';
+          if (myBidsLink)  myBidsLink.style.display  = 'none';
+          window.signout = () => {};
         }
-      })();
-
-      // Expose closeAuth used in the Cancel button
+      }catch(e){ /* non-fatal */ }
       window.closeAuth = () => document.getElementById('authModal')?.classList.remove('open');
     });
+  })();
   </script>
 </body>
 </html>
