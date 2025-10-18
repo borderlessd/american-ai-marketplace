@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Register — American AI Marketplace</title>
   <link rel="stylesheet" href="/assets/styles.css">
+
+  <!-- Supabase client -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script>
+    window.SUPABASE_URL = "https://xntxctjjtfjeznircuas.supabase.co";
+    window.SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhudHhjdGpqdGZqZXpuaXJjdWFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA2ODkxNTAsImV4cCI6MjA3NjI2NTE1MH0.KeP_BvUDX1nde1iw95sv0ETtcseVEjDuR7gcYHPmsVk";
+  </script>
 </head>
 <body>
   <div class="nav">
@@ -12,43 +19,105 @@
     <div>
       <a href="/index.html">Home</a>
       <a href="/loads.html">Find Loads</a>
-      <a href="/register.html" class="active">Register</a>
+      <a href="/register.html">Register</a>
+      <a href="/my-bids.html">My Bids</a>
     </div>
   </div>
 
-  <div class="wrap" style="max-width:640px;margin:24px auto;">
-    <h2>Create Carrier Account</h2>
-    <form id="regForm">
-      <label>Email
-        <input id="regEmail" type="email" class="input" required placeholder="name@example.com">
+  <div class="wrap">
+    <h1>Create your carrier account</h1>
+
+    <div class="panel" style="max-width:560px">
+      <div class="title">Sign up</div>
+
+      <label>Company Name
+        <input id="regCompany" class="input" placeholder="e.g. Red Rock Transport">
       </label>
       <div style="height:8px"></div>
+
+      <label>Email
+        <input id="regEmail" type="email" class="input" placeholder="name@example.com">
+      </label>
+      <div style="height:8px"></div>
+
       <label>Password
-        <input id="regPass" type="password" class="input" required placeholder="Minimum 6 characters">
+        <input id="regPass" type="password" class="input" placeholder="Create a password">
       </label>
 
-      <div style="height:16px"></div>
-      <fieldset style="border:1px solid #ddd;padding:12px;border-radius:8px;">
-        <legend>Optional profile</legend>
-        <label>Company <input id="regCompany" class="input" placeholder="Company name"></label>
-        <div style="height:8px"></div>
-        <label>Contact name <input id="regName" class="input" placeholder="Your name"></label>
-        <div style="height:8px"></div>
-        <label>Phone <input id="regPhone" class="input" placeholder="(555) 555-5555"></label>
-        <div style="height:8px"></div>
-        <label>MC Number <input id="regMC" class="input" placeholder="MC#######"></label>
-      </fieldset>
-
       <div id="regError" class="error" style="margin-top:8px"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-        <a class="btn secondary" href="/loads.html">Cancel</a>
-        <button class="btn" type="submit">Register</button>
+
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px">
+        <a class="btn secondary" href="/index.html">Cancel</a>
+        <button class="btn" id="regSubmit">Create Account</button>
       </div>
-    </form>
+
+      <div style="margin-top:12px; font-size:14px">
+        Already have an account? <a href="/my-bids.html">Sign in</a>
+      </div>
+    </div>
   </div>
 
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-  <script src="/assets/register.js"></script>
-  <script src="/assets/nav.js?v=1" defer></script>
+  <script>
+    (function(){
+      const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_KEY);
+
+      async function upsertCarrierProfile(userId, company){
+        // Try to insert into "carriers" (ignore if table missing)
+        try {
+          await sb.from('carriers').upsert({
+            auth_user_id: userId,
+            company: company || 'Carrier',
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'auth_user_id' });
+        } catch(_) {}
+
+        // Try to insert into "profiles" (ignore if table missing)
+        try {
+          await sb.from('profiles').upsert({
+            id: userId,
+            company: company || 'Carrier',
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'id' });
+        } catch(_) {}
+      }
+
+      document.getElementById('regSubmit')?.addEventListener('click', async () => {
+        const err = document.getElementById('regError');
+        const email = (document.getElementById('regEmail')?.value || '').trim();
+        const pass  = (document.getElementById('regPass')?.value || '').trim();
+        const company = (document.getElementById('regCompany')?.value || '').trim();
+
+        if (!email || !pass){
+          if (err) err.textContent = 'Email and password are required.';
+          return;
+        }
+        if (pass.length < 6){
+          if (err) err.textContent = 'Password must be at least 6 characters.';
+          return;
+        }
+
+        try{
+          if (err) err.textContent = '';
+          const { data, error } = await sb.auth.signUp({ email, password: pass });
+          if (error) throw error;
+
+          const userId = data?.user?.id;
+          if (userId) {
+            await upsertCarrierProfile(userId, company);
+          }
+
+          // Try to sign in immediately (if email confirmation disabled)
+          try{
+            await sb.auth.signInWithPassword({ email, password: pass });
+          }catch(_){ /* ignore if email confirmation required */ }
+
+          alert('Account created. You can now sign in and place bids.');
+          window.location.href = '/index.html';
+        }catch(e){
+          if (err) err.textContent = e.message || 'Registration failed.';
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
