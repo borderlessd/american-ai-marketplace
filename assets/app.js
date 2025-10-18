@@ -1,4 +1,4 @@
-===/* =========================================================================
+======/* =========================================================================
    /assets/app.js — rock-solid render + bid
    ========================================================================= */
 
@@ -815,4 +815,207 @@ document.addEventListener('DOMContentLoaded', ()=>{
       window.submitBid.__aim_finalPatch = true;
     }
   })();
+})();
+
+/* ======================================================================
+   BULLETPROOF BID: modal snapshot + pre-click guards (append-only)
+   - Captures payload on Bid press and stores it IN the modal (hidden)
+   - Submit reads only that payload (sorting/pagination safe)
+   - Kills any anchor jump-to-top BEFORE it happens
+   ====================================================================== */
+(function bidModalSnapshot(){
+  // --- tiny helpers ---
+  const pick = (...xs)=>{ for(const x of xs){ if(x!=null && x!=='') return x; } return ''; };
+  const fromCity = l => pick(l.from_city,l.fromCity,l.originCity,l.origin,l.pickup_city,l.pickupCity,l.from);
+  const toCity   = l => pick(l.to_city,l.toCity,l.destinationCity,l.destination,l.dropoff_city,l.dropoffCity,l.to);
+  const dateStr  = l => { const r = pick(l.date,l.available,l.availableDate,l.pickup_date,l.pickupDate,l.readyDate,l.date_available); return r?String(r):''; };
+  const itemName = l => pick(l.item,l.vehicle,l.commodity,'Item');
+  const safeMiles = m => { const n=(typeof m==='string')?Number(m.replace(/,/g,'')):Number(m); return Number.isFinite(n)?n:null; };
+  const makeKey  = l => (l?.load_number||l?.id||l?.uuid||l?.key) ||
+    `${fromCity(l)||'FROM'}-${toCity(l)||'TO'}-${dateStr(l)||''}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
+  const idsFor   = l => { const ident = l?.load_number || l?.id || l?.uuid || l?.key || makeKey(l) || ''; return { load_number:String(ident), load_id:String(l?.id||ident) }; };
+
+  function payloadFromObj(l){
+    if (!l) return null;
+    const ids = idsFor(l);
+    return {
+      __key: makeKey(l),
+      load_number: ids.load_number,
+      load_id: ids.load_id,
+      route_from: fromCity(l)||'',
+      route_to: toCity(l)||'',
+      item: itemName(l)||'Item',
+      miles: safeMiles(l.miles),
+      available: dateStr(l)||''
+    };
+  }
+
+  function payloadFromCard(card){
+    if (!card) return null;
+    // Prefer data-aim-payload if render stamped it
+    const s = card.dataset?.aimPayload;
+    if (s) { try { return JSON.parse(s); } catch(_){} }
+    // Fallback: shallow parse from visible text
+    const routeTxt = (card.querySelector('.route')?.textContent||'').trim();
+    let rf='', rt='';
+    if (routeTxt.includes('→')) {
+      const [f,t]=routeTxt.split('→');
+      rf=(f||'').trim(); rt=(t||'').replace(/\s+(OPEN|ACTIVE|CLOSED|PENDING).*$/i,'').trim();
+    }
+    const metas = Array.from(card.querySelectorAll('.meta')).map(x=>x.textContent.trim());
+    const item  = (metas.find(t=>/^item:/i.test(t))||'').replace(/^item:\s*/i,'').trim() || 'Item';
+    const milesStr = (metas.find(t=>/^miles:/i.test(t))||'').replace(/[^0-9]/g,'');
+    const miles = milesStr ? Number(milesStr) : null;
+    const avail = (metas.find(t=>/^first available date:/i.test(t))||'').replace(/^first available date:\s*/i,'').trim();
+    const key   = card.dataset?.aimId || `${rf}-${rt}-${avail}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
+    const ids   = idsFor({ load_number:key });
+    return { __key:key, load_number:ids.load_number, load_id:ids.load_id, route_from:rf, route_to:rt, item, miles, available:avail };
+  }
+
+  // --- ensure hidden payload store exists inside the modal ---
+  function ensureHiddenStore(){
+    let modal = document.getElementById('bidModal');
+    if (!modal) {
+      // create minimal modal if page lacks one (safety)
+      const shell = document.createElement('div');
+      shell.innerHTML = `
+        <div id="bidModal" class="modal"><div class="panel">
+          <div class="title">Submit a Bid</div>
+          <label>Offer Amount (USD)
+            <input id="bidAmount" type="number" class="input" min="1" step="1" placeholder="e.g. 1299">
+          </label>
+          <div style="height:8px"></div>
+          <label>Notes (optional)
+            <input id="bidNotes" class="input" placeholder="Any extra details…">
+          </label>
+          <div id="bidError" class="error"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+            <button class="btn secondary" type="button" onclick="(window.closeBidModal||function(){document.getElementById('bidModal')?.classList.remove('open');})()">Cancel</button>
+            <button class="btn" type="button" onclick="window.submitBid && window.submitBid()">Submit Bid</button>
+          </div>
+        </div></div>`;
+      document.body.appendChild(shell.firstElementChild);
+      modal = document.getElementById('bidModal');
+    }
+    if (!modal.querySelector('#bidPayloadStore')) {
+      const ta = document.createElement('textarea');
+      ta.id = 'bidPayloadStore';
+      ta.style.display = 'none';
+      modal.appendChild(ta);
+    }
+  }
+  ensureHiddenStore();
+
+  // --- PREVENT JUMP: capture at pointer/touch/click before anchors fire ---
+  function killAnchorDefault(ev){
+    const a = ev.target.closest('a');
+    if (!a) return;
+    const href = a.getAttribute('href') || '';
+    if (href === '' || href === '#' || href.startsWith('#')){
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.stopImmediatePropagation();
+    }
+  }
+  if (!document.__aimAnchorGuards){
+    document.__aimAnchorGuards = true;
+    ['pointerdown','touchstart','click'].forEach(type=>{
+      document.addEventListener(type, killAnchorDefault, true);
+    });
+  }
+
+  // --- capture payload WHEN you press Bid, store it in the modal ---
+  function onBidTrigger(ev){
+    const el = ev.target.closest('button, a');
+    if (!el) return;
+    const isBidBtn = /(^|\s)btn(\s|$)/.test(el.className||'') && /bid/i.test(el.textContent||'');
+    if (!isBidBtn) return;
+
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.stopImmediatePropagation();
+
+    const card = el.closest('.load-card, .card');
+    if (!card) return;
+
+    // Build payload right now from the card
+    let snap = payloadFromCard(card);
+
+    // If render(list) saved a JS object list, try to refine snapshot with that object
+    if ((!snap || !snap.load_number) && Array.isArray(window.__lastList) && window.__lastList.length){
+      const key = card.dataset?.aimId || null;
+      const obj = key ? window.__lastList.find(x => makeKey(x) === key) : null;
+      if (obj) snap = payloadFromObj(obj);
+    }
+
+    // Store snapshot inside the modal (source of truth for submit)
+    const store = document.getElementById('bidPayloadStore');
+    if (store) store.value = snap ? JSON.stringify(snap) : '';
+
+    // open modal or auth
+    const uid = (window.__aimAuth && window.__aimAuth.uid) || null;
+    if (!uid){
+      (typeof window.openAuth==='function' ? window.openAuth() : document.getElementById('authModal')?.classList.add('open'));
+      return;
+    }
+    (typeof window.openBidModal==='function' ? window.openBidModal() : document.getElementById('bidModal')?.classList.add('open'));
+  }
+
+  if (!document.__aimBidPressGuard){
+    document.__aimBidPressGuard = true;
+    // Use pointerdown to beat any click side-effects
+    document.addEventListener('pointerdown', onBidTrigger, true);
+    // Also guard click for keyboard activation/older browsers
+    document.addEventListener('click', onBidTrigger, true);
+  }
+
+  // --- override submitBid to read ONLY the modal’s snapshot ---
+  const origSubmit = (typeof window.submitBid === 'function') ? window.submitBid : null;
+  window.submitBid = async function(){
+    const err = document.getElementById('bidError');
+    const amtEl = document.getElementById('bidAmount');
+    const notesEl = document.getElementById('bidNotes');
+    const store = document.getElementById('bidPayloadStore');
+
+    // amount check
+    const raw = (amtEl?.value||'').trim();
+    const amount = Number(raw);
+    if (!raw || !Number.isFinite(amount) || amount<=0){ if (err) err.textContent='Please enter a valid dollar amount.'; return; }
+
+    // auth check
+    let uid = (window.__aimAuth && window.__aimAuth.uid) || null;
+    if (!uid && window.sb?.auth){ try { const { data } = await sb.auth.getUser(); uid = data?.user?.id || null; } catch(_){} }
+    if (!uid){ (typeof window.openAuth==='function'? window.openAuth() : document.getElementById('authModal')?.classList.add('open')); return; }
+
+    // payload from modal (single source of truth)
+    let snap = null;
+    if (store && store.value){ try { snap = JSON.parse(store.value); } catch(_){} }
+    if (!snap){ if (err) err.textContent = 'Load not found.'; return; }
+
+    const ids = idsFor({ load_number:snap.load_number, id:snap.load_id });
+    const payload = {
+      load_number: ids.load_number,
+      load_id: ids.load_id,
+      route_from: snap.route_from || '',
+      route_to: snap.route_to || '',
+      item: snap.item || 'Item',
+      miles: (typeof snap.miles==='number' ? snap.miles : null),
+      price_offer: Math.round(amount),
+      notes: (notesEl?.value||'').trim() || null,
+      auth_user_id: uid,
+      status: 'SUBMITTED',
+      created_at: new Date().toISOString()
+    };
+
+    try{
+      const { error } = await (window.sb ? sb.from('bids').insert(payload) : Promise.reject(new Error('No DB client')));
+      if (error) throw error;
+      (typeof window.closeBidModal==='function' ? window.closeBidModal() : document.getElementById('bidModal')?.classList.remove('open'));
+      alert('Bid submitted! You can review it in Admin.');
+      if (store) store.value = ''; // clear after success
+    }catch(e){
+      console.error('Bid insert failed:', e);
+      if (err) err.textContent = e.message || 'Failed to submit bid.';
+    }
+  };
 })();
