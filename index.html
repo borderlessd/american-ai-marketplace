@@ -3,57 +3,112 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Admin — Bids</title>
+  <title>American AI Marketplace</title>
   <link rel="stylesheet" href="/assets/styles.css">
-  <style>
-    .admin-wrap{ max-width: 1000px; margin: 24px auto; }
-    .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
-    table { width:100%; border-collapse:collapse; }
-    th, td { padding:8px; border-bottom:1px solid #ddd; text-align:left; }
-    td.num { text-align:right; }
-    .panel{ border:1px solid #ddd; padding:16px; border-radius:8px; }
-  </style>
 </head>
 <body>
+  <!-- Top Nav -->
   <div class="nav">
     <div><a href="/index.html">American AI Marketplace</a></div>
     <div>
+      <a href="/index.html">Home</a>
       <a href="/loads.html">Find Loads</a>
-      <a href="/admin/" class="active">Admin</a>
+      <a href="/register.html">Register</a>
+      <!-- Admin link is revealed by app.js only when ?admin=true -->
+      <a id="adminLink" href="#" style="display:none"
+         onclick="document.getElementById('gateModal').classList.add('open');return false;">Admin</a>
     </div>
   </div>
 
-  <!-- Login view -->
-  <div class="admin-wrap" id="loginView" style="display:none;">
-    <h2>Admin Login</h2>
+  <!-- Hero -->
+  <section class="hero">
+    <h1>Move America, intelligently.</h1>
+    <div class="wrap" style="text-align:center">
+      <span class="badge">US-based</span>
+      <span class="badge">MC/USDOT</span>
+      <span class="badge">5% Marketplace Fee</span>
+    </div>
+  </section>
+
+  <!-- Main Content -->
+  <div class="wrap">
+    <div class="controls">
+      <input id="q" class="input" placeholder="Search city, commodity, item…">
+      <select id="commodity" class="input">
+        <option value="">All commodities</option>
+        <option>Vehicle</option><option>Boat</option><option>Motorcycle</option>
+        <option>Household</option><option>LTL</option><option>Pets</option><option>Heavy Equipment</option>
+      </select>
+    </div>
+
+    <!-- Cards grid populated by /assets/app.js -->
+    <div id="grid" class="grid"></div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="wrap footer-note">
+      © American AI Marketplace
+    </div>
+  </div>
+
+  <!-- View Modal (load details) -->
+  <div id="viewModal" class="modal">
     <div class="panel">
-      <div class="row">
-        <input id="admUser" class="input" placeholder="Username">
-        <input id="admPass" class="input" type="password" placeholder="Password">
-        <button class="btn" id="admLoginBtn">Login</button>
+      <div id="viewContent"></div>
+    </div>
+  </div>
+
+  <!-- Carrier Auth Modal (sign in to bid) -->
+  <div id="authModal" class="modal">
+    <div class="panel">
+      <div class="title">Sign in</div>
+      <label>Email
+        <input id="authEmail" type="email" class="input" placeholder="name@example.com">
+      </label>
+      <div style="height:8px"></div>
+      <label>Password
+        <input id="authPass" type="password" class="input" placeholder="Enter your password">
+      </label>
+      <div id="authError" class="error"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button class="btn secondary" onclick="document.getElementById('authModal').classList.remove('open')">Cancel</button>
+        <button class="btn" onclick="signin()">Continue</button>
       </div>
-      <div id="loginMsg" class="error"></div>
     </div>
   </div>
 
-  <!-- Main view -->
-  <div class="admin-wrap" id="mainView" style="display:none;">
-    <h2>All Bids</h2>
-    <div class="row">
-      <input id="admLoad" class="input" placeholder="Filter: Load # (optional)">
-      <button class="btn" id="admFetch">Fetch</button>
-      <button class="btn secondary" id="admCSV">Export CSV</button>
-      <button class="btn secondary" id="admLogout" style="margin-left:auto;">Logout</button>
-      <div id="admMsg" class="error"></div>
+  <!-- Admin Gate Modal (just routes to /admin/ after a simple check) -->
+  <div id="gateModal" class="modal">
+    <div class="panel">
+      <div class="title">Admin Access</div>
+      <label>Username
+        <input id="gateUser" class="input" placeholder="Enter a username">
+      </label>
+      <div style="height:8px"></div>
+      <label>Password
+        <input id="gatePass" type="password" class="input" placeholder="Enter your password">
+      </label>
+      <div id="gateError" class="error"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button class="btn secondary" onclick="document.getElementById('gateModal').classList.remove('open')">Cancel</button>
+        <button class="btn" onclick="(function(){
+          const u = document.getElementById('gateUser').value.trim();
+          const p = document.getElementById('gatePass').value.trim();
+          const okU='admin', okP='market'; // change if you want
+          if(u===okU && p===okP){
+            sessionStorage.setItem('aim_admin_ok','1');
+            window.location.href='/admin/';
+          }else{
+            document.getElementById('gateError').textContent='Invalid username or password.';
+          }
+        })()">Enter</button>
+      </div>
     </div>
-    <table>
-      <thead>
-        <tr><th>When</th><th>Load #</th><th>User</th><th class="num">Amount</th><th>Notes</th></tr>
-      </thead>
-      <tbody id="admRows"></tbody>
-    </table>
   </div>
 
-  <script src="/assets/admin.js"></script>
+  <!-- Scripts: Supabase MUST load before app.js -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="/assets/app.js"></script>
 </body>
 </html>
