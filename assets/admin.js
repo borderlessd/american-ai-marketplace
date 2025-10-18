@@ -11,7 +11,7 @@ function setRows(rows) {
     <tr>
       <td>${r.created_at ? new Date(r.created_at).toLocaleString() : ''}</td>
       <td>${r.load_number || ''}</td>
-      <td>${r.auth_user_id || ''}</td>
+      <td>${r.company_name || ''}</td>
       <td class="num">${(r.amount!=null && r.amount!=='') ? '$'+Math.round(Number(r.amount||0)).toLocaleString() : ''}</td>
       <td>${r.notes || ''}</td>
     </tr>
@@ -56,7 +56,7 @@ async function fetchBids(){
 
 function exportCSV() {
   const rows = window.__adm_last || [];
-  const headers = ['created_at','load_number','auth_user_id','amount','notes'];
+  const headers = ['created_at','load_number','company_name','amount','notes'];
   const csv = [headers.join(',')];
   rows.forEach(r => {
     const line = headers.map(h => {
@@ -86,7 +86,6 @@ function showMain(){
 
 document.addEventListener('DOMContentLoaded', ()=>{
   if (token()) showMain(); else showLogin();
-
   document.getElementById('admLoginBtn')?.addEventListener('click', login);
   document.getElementById('admFetch')?.addEventListener('click', fetchBids);
   document.getElementById('admCSV')?.addEventListener('click', exportCSV);
