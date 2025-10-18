@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>My Bids — American AI Marketplace</title>
   <link rel="stylesheet" href="/assets/styles.css">
+
+  <!-- Supabase client -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script>
+    window.SUPABASE_URL = "https://xntxctjjtfjeznircuas.supabase.co";
+    window.SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhudHhjdGpqdGZqZXpuaXJjdWFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA2ODkxNTAsImV4cCI6MjA3NjI2NTE1MH0.KeP_BvUDX1nde1iw95sv0ETtcseVEjDuR7gcYHPmsVk";
+  </script>
 </head>
 <body>
   <div class="nav">
@@ -12,18 +19,131 @@
     <div>
       <a href="/index.html">Home</a>
       <a href="/loads.html">Find Loads</a>
-      <a href="/my-bids.html" class="active">My Bids</a>
+      <a href="/register.html">Register</a>
+      <a href="/my-bids.html">My Bids</a>
     </div>
   </div>
 
-  <div class="wrap" style="max-width:960px;margin:24px auto;">
-    <h2>My Bids</h2>
-    <div id="bidsList" class="grid"></div>
-    <div id="bidsEmpty" style="display:none;opacity:.8;margin-top:12px;">No bids yet.</div>
+  <div class="wrap">
+    <h1>My Bids</h1>
+
+    <!-- Sign-in panel -->
+    <div id="signinPanel" class="panel" style="max-width:520px; display:none">
+      <div class="title">Sign in</div>
+      <label>Email <input id="loginEmail" type="email" class="input" placeholder="name@example.com"></label>
+      <div style="height:8px"></div>
+      <label>Password <input id="loginPass" type="password" class="input" placeholder="Enter your password"></label>
+      <div id="loginError" class="error"></div>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px">
+        <a class="btn secondary" href="/register.html">Create an account</a>
+        <button class="btn" id="loginBtn">Sign in</button>
+      </div>
+    </div>
+
+    <!-- Bids panel -->
+    <div id="bidsPanel" style="display:none">
+      <div class="controls" style="justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap">
+        <div>
+          <button class="btn secondary" id="refreshBids">Refresh</button>
+        </div>
+        <div>
+          <button class="btn" id="signOutBtn">Sign out</button>
+        </div>
+      </div>
+
+      <div id="bidsList" class="grid"></div>
+      <div id="bidsEmpty" class="panel" style="display:none">No bids yet.</div>
+    </div>
   </div>
 
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-  <script src="/assets/my-bids.js"></script>
-  <script src="/assets/nav.js?v=1" defer></script>
+  <script>
+    (function(){
+      const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_KEY);
+      const $ = (q, el=document) => el.querySelector(q);
+
+      function fmt(n){ return new Intl.NumberFormat().format(n); }
+      function dateFmt(s){ try{ const d=new Date(s); return isNaN(d)? String(s||''): d.toLocaleString(); }catch(_){ return String(s||''); } }
+
+      async function showState(){
+        const { data } = await sb.auth.getUser();
+        const isAuthed = !!data?.user;
+        $('#signinPanel').style.display = isAuthed ? 'none' : '';
+        $('#bidsPanel').style.display   = isAuthed ? '' : 'none';
+        if (isAuthed) loadBids();
+      }
+
+      async function loadBids(){
+        const list = $('#bidsList');
+        const empty = $('#bidsEmpty');
+        list.innerHTML = '';
+        empty.style.display = 'none';
+
+        const { data: auth } = await sb.auth.getUser();
+        const uid = auth?.user?.id;
+        if (!uid){ await showState(); return; }
+
+        // Pull current user's bids
+        const { data, error } = await sb
+          .from('bids')
+          .select('*')
+          .eq('auth_user_id', uid)
+          .order('created_at', { ascending:false });
+
+        if (error){
+          list.innerHTML = `<div class="panel"><div class="error">${error.message}</div></div>`;
+          return;
+        }
+
+        if (!data || data.length === 0){
+          empty.style.display = '';
+          return;
+        }
+
+        list.innerHTML = data.map(b => {
+          const price = (b.price_offer && Number.isFinite(Number(b.price_offer)))
+            ? `$${fmt(Number(b.price_offer))}` : '—';
+          const route = `${b.route_from || ''} → ${b.route_to || ''}`.trim();
+          return `
+            <article class="card">
+              <div class="route">${route} <span class="status ${String(b.status||'SUBMITTED').toLowerCase()}">${String(b.status||'SUBMITTED').toUpperCase()}</span></div>
+              <div class="meta"><strong>Item:</strong> ${b.item || 'Item'}</div>
+              <div class="meta"><strong>Miles:</strong> ${b.miles!=null? fmt(Number(b.miles)) : ''}</div>
+              <div class="meta"><strong>Offer:</strong> ${price}</div>
+              <div class="meta"><strong>Created:</strong> ${dateFmt(b.created_at)}</div>
+              ${b.notes ? `<div class="meta"><strong>Notes:</strong> ${String(b.notes)}</div>` : ''}
+            </article>
+          `;
+        }).join('');
+      }
+
+      // Sign in
+      $('#loginBtn')?.addEventListener('click', async ()=>{
+        const err = $('#loginError');
+        const email = ($('#loginEmail')?.value || '').trim();
+        const pass  = ($('#loginPass')?.value || '').trim();
+        if (!email || !pass){ if(err) err.textContent = 'Email and password required.'; return; }
+        try{
+          if (err) err.textContent = '';
+          const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+          if (error) throw error;
+          await showState();
+        }catch(e){
+          if (err) err.textContent = e.message || 'Sign-in failed.';
+        }
+      });
+
+      // Sign out
+      $('#signOutBtn')?.addEventListener('click', async ()=>{
+        await sb.auth.signOut();
+        await showState();
+      });
+
+      // Refresh
+      $('#refreshBids')?.addEventListener('click', loadBids);
+
+      // Initial state
+      showState();
+    })();
+  </script>
 </body>
 </html>
