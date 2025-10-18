@@ -366,3 +366,89 @@ window.submitBid = async function(){
     if (err) err.textContent = e.message || 'Failed to submit bid.';
   }
 };
+
+/* ===== APPEND-ONLY PATCH: ensure load_number + load_id always sent ===== */
+(function(){
+  // Reuse your pick/fromCity/toCity/safeMiles if they exist; otherwise define light fallbacks
+  const pick = (typeof window.pick === 'function') ? window.pick : (...xs)=>{ for(const x of xs){ if(x!=null && x!=='') return x; } return ''; };
+  const fromCity = (typeof window.fromCity === 'function') ? window.fromCity :
+    (x)=>pick(x.from_city,x.fromCity,x.originCity,x.origin,x.pickup_city,x.pickupCity,x.from);
+  const toCity = (typeof window.toCity === 'function') ? window.toCity :
+    (x)=>pick(x.to_city,x.toCity,x.destinationCity,x.destination,x.dropoff_city,x.dropoffCity,x.to);
+  const itemName = (typeof window.itemName === 'function') ? window.itemName :
+    (x)=>pick(x.item,x.vehicle,x.commodity,'Item');
+  const safeMiles = (typeof window.safeMiles === 'function') ? window.safeMiles :
+    (x)=>{ const m=x.miles; const n=(typeof m==='string')?Number(m.replace(/,/g,'')):Number(m); return Number.isFinite(n)?n:null; };
+
+  function dateStr(x){
+    const raw = pick(x.date,x.available,x.availableDate,x.pickup_date,x.pickupDate,x.readyDate,x.date_available);
+    return raw ? String(raw) : '';
+  }
+
+  // Build a canonical identifier we can use for BOTH load_id and load_number if needed
+  function getLoadIdentifiers(l){
+    const ln = l.load_number || l.loadNo || l.loadNum;
+    const id = l.id || l.uuid || l.key;
+    let ident = ln || id;
+
+    if (!ident) {
+      const f = fromCity(l) || 'from';
+      const t = toCity(l) || 'to';
+      const d = dateStr(l) || new Date().toISOString().slice(0,10);
+      ident = `${f}-${t}-${d}`.replace(/\s+/g,'_').toUpperCase().slice(0,64);
+    }
+    return { load_number: String(ident), load_id: String(id || ident) };
+  }
+
+  // Replace ONLY the submit logic to include load_number + load_id
+  window.submitBid = async function(){
+    const err = document.getElementById('bidError');
+    const amtEl = document.getElementById('bidAmount');
+    const notesEl = document.getElementById('bidNotes');
+
+    const raw = (amtEl?.value || '').trim();
+    const amount = Number(raw);
+    if (!raw || !Number.isFinite(amount) || amount <= 0) {
+      if (err) err.textContent = 'Please enter a valid dollar amount.';
+      return;
+    }
+
+    if (!window.sb?.auth) { openAuth(); return; }
+    const { data: userData } = await sb.auth.getUser();
+    const userId = userData?.user?.id;
+    if (!userId) { openAuth(); return; }
+
+    const idx = (typeof window.__currentBidIndex === 'number') ? window.__currentBidIndex : null;
+    const l = Array.isArray(window.LOADS) ? window.LOADS[idx] : null;
+    if (!l) { if (err) err.textContent = 'Load not found.'; return; }
+
+    const ids = getLoadIdentifiers(l);
+
+    const payload = {
+      // 🔒 ensure both are present to satisfy your DB constraint
+      load_number: ids.load_number,
+      load_id: ids.load_id,
+
+      route_from: fromCity(l),
+      route_to: toCity(l),
+      item: itemName(l),
+      miles: safeMiles(l),
+      price_offer: Math.round(amount),
+      notes: (notesEl?.value || '').trim() || null,
+      auth_user_id: userId,
+      status: 'SUBMITTED',
+      created_at: new Date().toISOString()
+    };
+
+    try{
+      const { error } = await sb.from('bids').insert(payload);
+      if (error) throw error;
+      // success
+      document.getElementById('bidModal')?.classList.remove('open');
+      alert('Bid submitted! You can review it in Admin.');
+    }catch(e){
+      console.error('Bid insert failed:', e);
+      if (err) err.textContent = e.message || 'Failed to submit bid.';
+    }
+  };
+})();
