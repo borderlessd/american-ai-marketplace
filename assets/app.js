@@ -3,18 +3,26 @@
 let LOADS = [];
 let TOKEN = localStorage.getItem('aim_token') || '';
 
-// Supabase client (reuse if already created elsewhere)
+// Make sure Supabase client ALWAYS exists using the config from index.html
 let sb = window.sb || (function(){
-  // If you already create sb in another script, this will be skipped.
-  // If not, and you want to wire here, fill in your project + anon key:
-  const SUPABASE_URL = window.SUPABASE_URL || "";   // e.g. "https://xntxctjjtfjeznircuas.supabase.co"
-  const SUPABASE_KEY = window.SUPABASE_KEY || "";   // your anon key
   try{
-    if (SUPABASE_URL && SUPABASE_KEY && window.supabase) {
-      return window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const url = window.SUPABASE_URL;
+    const key = window.SUPABASE_KEY;
+    if (!url || !key) {
+      console.warn('Supabase config missing: set window.SUPABASE_URL and window.SUPABASE_KEY before app.js');
+      return null;
     }
-  }catch(e){}
-  return null;
+    if (!window.supabase) {
+      console.error('supabase-js not loaded. Make sure <script src="https://unpkg.com/@supabase/supabase-js@2"></script> is before app.js');
+      return null;
+    }
+    const c = window.supabase.createClient(url, key);
+    window.sb = c;
+    return c;
+  }catch(e){
+    console.error('Supabase init error', e);
+    return null;
+  }
 })();
 
 const $  = (q, el=document) => el.querySelector(q);
@@ -53,7 +61,6 @@ function pick(...xs){
 }
 
 function dateStr(l){
-  // supports: l.date, l.available, l.availableDate, l.pickup_date, etc.
   const raw = pick(l.date, l.available, l.availableDate, l.pickup_date, l.pickupDate, l.readyDate, l.date_available);
   return raw ? String(raw) : '';
 }
@@ -64,34 +71,33 @@ function fromCity(l){
 function toCity(l){
   return pick(l.to_city, l.toCity, l.destinationCity, l.destination, l.dropoff_city, l.dropoffCity, l.to);
 }
-
 function itemName(l){
   return pick(l.item, l.vehicle, l.commodity, 'Item');
 }
-
 function safeMiles(l){
   const m = l.miles;
   const n = (typeof m === 'string') ? Number(m.replace(/,/g,'')) : Number(m);
   return Number.isFinite(n) ? n : '';
 }
 
-/* Price: only show if we have a REAL dollar amount. Blank/TBD should hide line entirely */
+/* Price: only show when it's a real number > 0. Blank/TBD/N/A/0 hides the line entirely. */
 function priceHTML(l){
   let p = l.price;
-  if (p == null) return ''; // no price -> hide
 
-  // If it's a string, check for TBD/blank
+  // Blank entirely?
+  if (p == null) return '';
+
+  // String cases
   if (typeof p === 'string') {
     const s = p.trim().toUpperCase();
-    if (!s || s === 'TBD' || s === 'N/A') return ''; // hide entire price line
-    // Try to parse a number from it
+    if (!s || s === 'TBD' || s === 'N/A' || s === 'NA' || s === '—' || s === '-') return '';
     const num = Number(s.replace(/[^0-9.]/g,''));
-    if (Number.isFinite(num)) return `<div class="price" style="margin:8px 0">Price: $${fmt(num)}</div>`;
-    return ''; // not a number -> hide
+    if (Number.isFinite(num) && num > 0) return `<div class="price" style="margin:8px 0">Price: $${fmt(num)}</div>`;
+    return '';
   }
 
-  // If it's a number
-  if (typeof p === 'number' && Number.isFinite(p)) {
+  // Numeric case
+  if (typeof p === 'number' && Number.isFinite(p) && p > 0) {
     return `<div class="price" style="margin:8px 0">Price: $${fmt(p)}</div>`;
   }
 
@@ -110,8 +116,7 @@ function render(list){
     const miles     = safeMiles(l);
     const date      = dateStr(l);
     const item      = val(itemName(l));
-
-    const priceBlock = priceHTML(l); // empty string if blank/TBD/invalid
+    const priceBlock = priceHTML(l); // empty string if non-numeric/TBD/etc.
 
     return `
     <article class="card load-card">
@@ -200,7 +205,6 @@ async function signin(){
     if (error) throw error;
 
     closeAuth();
-    // optional profile bootstrap happens elsewhere
     location.reload();
   }catch(e){
     if (err) err.textContent = e.message || 'Sign-in failed.';
@@ -211,34 +215,29 @@ async function bid(index){
   const l = LOADS[index];
   if (!l) return;
 
-  // Require auth
   try{
     if (!sb) { openAuth(); return; }
     const { data: userData } = await sb.auth.getUser();
     const userId = userData?.user?.id;
     if (!userId) { openAuth(); return; }
 
-    // Example insert (adjust columns to match your 'bids' table schema)
-    // If you already have working bid code elsewhere, keep it; this is a safe fallback.
     const payload = {
       load_id: l.id || l.load_number || null,
       route_from: fromCity(l),
       route_to: toCity(l),
       item: itemName(l),
       miles: safeMiles(l) || null,
-      price_offer: null,           // you can collect an offer amount in a modal if you want
+      price_offer: null,
       auth_user_id: userId,
       status: 'SUBMITTED',
       created_at: new Date().toISOString()
     };
 
-    // If you’ve got your table named 'bids'
     const { error } = await sb.from('bids').insert(payload);
     if (error) throw error;
 
     alert('Bid submitted. You can see it in Admin.');
   }catch(e){
-    // If the table/columns differ, open auth or show a friendly message
     console.warn('Bid error', e);
     openAuth();
   }
