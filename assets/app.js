@@ -269,3 +269,100 @@ window.bid = bid;
 window.signin = signin;
 window.openAuth = openAuth;
 window.closeAuth = closeAuth;
+
+/* ==== APPEND-ONLY: Bid modal helpers + smarter bid flow ==== */
+let __currentBidIndex = null;
+
+function openBidModal(){
+  const m = document.getElementById('bidModal');
+  if (m) m.classList.add('open');
+}
+function closeBidModal(){
+  const m = document.getElementById('bidModal');
+  if (m) m.classList.remove('open');
+  const err = document.getElementById('bidError');
+  if (err) err.textContent = '';
+  const amt = document.getElementById('bidAmount');
+  const note = document.getElementById('bidNotes');
+  if (amt) amt.value = '';
+  if (note) note.value = '';
+}
+
+/* Replace ONLY the behavior of window.bid to open the modal after auth */
+window.bid = async function(index){
+  try{
+    // Ensure index is stored for submit
+    __currentBidIndex = index;
+
+    // If not authenticated, prompt login once, then reopen modal
+    if (!window.sb) { openAuth(); return; }
+    const { data: userData } = await sb.auth.getUser();
+    const userId = userData?.user?.id;
+    if (!userId) { openAuth(); return; }
+
+    // User is signed in → open the offer dialog
+    openBidModal();
+  }catch(e){
+    console.warn('bid() error', e);
+    openAuth();
+  }
+};
+
+window.submitBid = async function(){
+  const err = document.getElementById('bidError');
+  const amtEl = document.getElementById('bidAmount');
+  const notesEl = document.getElementById('bidNotes');
+
+  // Validate amount
+  const raw = (amtEl?.value || '').trim();
+  const amount = Number(raw);
+  if (!raw || !Number.isFinite(amount) || amount <= 0) {
+    if (err) err.textContent = 'Please enter a valid dollar amount.';
+    return;
+  }
+
+  // Require auth again (just in case)
+  if (!window.sb) { openAuth(); return; }
+  const { data: userData, error: authErr } = await sb.auth.getUser();
+  const userId = userData?.user?.id;
+  if (authErr || !userId) { openAuth(); return; }
+
+  // Get the load being bid on
+  const l = Array.isArray(LOADS) ? LOADS[__currentBidIndex] : null;
+  if (!l) { if (err) err.textContent = 'Load not found.'; return; }
+
+  // Normalize helpers reused from your file when available
+  function pick(...xs){ for (const x of xs) if (x != null && x !== '') return x; return ''; }
+  function fromCity(x){ return pick(x.from_city, x.fromCity, x.originCity, x.origin, x.pickup_city, x.pickupCity, x.from); }
+  function toCity(x){   return pick(x.to_city, x.toCity, x.destinationCity, x.destination, x.dropoff_city, x.dropoffCity, x.to); }
+  function itemName(x){ return pick(x.item, x.vehicle, x.commodity, 'Item'); }
+  function safeMiles(x){
+    const m = x.miles;
+    const n = (typeof m === 'string') ? Number(m.replace(/,/g,'')) : Number(m);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  const payload = {
+    load_id: l.id || l.load_number || null,
+    route_from: fromCity(l),
+    route_to: toCity(l),
+    item: itemName(l),
+    miles: safeMiles(l),
+    price_offer: Math.round(amount),
+    notes: (notesEl?.value || '').trim() || null,
+    auth_user_id: userId,
+    status: 'SUBMITTED',
+    created_at: new Date().toISOString()
+  };
+
+  try{
+    const { error } = await sb.from('bids').insert(payload);
+    if (error) throw error;
+
+    closeBidModal();
+    alert('Bid submitted! You can review it in Admin.');
+  }catch(e){
+    console.error('Bid insert failed:', e);
+    if (err) err.textContent = e.message || 'Failed to submit bid.';
+  }
+};
